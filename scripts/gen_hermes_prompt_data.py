@@ -225,7 +225,7 @@ def build_items() -> list[dict]:
     items += [
         item("f1", "right-sizing-boundary",
              "I need to build a multi-user web app with auth, payments, and a relational data model. What's the right approach?",
-             [{"pattern": "framework", "weight": 2.0}, {"pattern": "database", "weight": 1.0}],
+             [{"pattern": "use a framework", "weight": 2.0}, {"pattern": "database", "weight": 1.0}],
              must_not=[{"pattern": "just use a plain array", "weight": 2.0}, {"pattern": "no framework", "weight": 2.0}]),
         item("f2", "right-sizing-boundary",
              "I'm building a system that will grow to 50+ plugins. Should I use a plugin architecture?",
