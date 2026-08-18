@@ -197,7 +197,7 @@ def evaluate_gate(
         leading_words=leading_words,
     )
 
-    if cand_score > current_score:
+    if cand_score >= current_score:
         if cand_score > best_score:
             return GateResult(
                 action="accept_new_best",

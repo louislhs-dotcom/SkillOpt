@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# SkillOpt-specific Switchyard deployment
+# Routes different phases to appropriate models via classifier
+
+schema_version = 1
+
+[llm_clients.nvidia]
+format = "openai_chat"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key_env = "NVIDIA_API_KEY"
+
+# Target models (all NVIDIA)
+[targets.classifier]
+id = "meta/llama-3.1-8b-instruct"
+llm_client = "nvidia"
+
+[targets.strong]
+id = "nvidia/nemotron-3-ultra-550b-a55b"
+llm_client = "nvidia"
+
+[targets.fast]
+id = "meta/llama-3.1-70b-instruct"
+llm_client = "nvidia"
+
+[targets.lightning]
+id = "nvidia/nemotron-3.5-lightning-30b-a3b"
+llm_client = "nvidia"
+
+# SkillOpt route: uses classifier to decide
+[routes.skillopt]
+id = "skillopt"
+type = "llm_classifier"
+classifier_target = "classifier"
+strong_target = "strong"
+weak_target = "fast"
+base_threshold = 0.4
+threshold_step = 0.1
+session_affinity = true
+message_hash_fallback = true
+
+# Direct routes for explicit model selection (passthrough to single target)
+[routes.nemotron]
+id = "nemotron"
+type = "passthrough"
+target = "strong"
+
+[routes.llama70b]
+id = "llama70b"
+type = "passthrough"
+target = "fast"
+
+[routes.lightning]
+id = "lightning"
+type = "passthrough"
+target = "lightning"

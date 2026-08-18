@@ -148,8 +148,14 @@ class TestEvaluateGateReject:
         assert result.best_score == pytest.approx(0.8)
         assert result.best_step == 2
 
-    def test_tie_with_current_rejects(self) -> None:
-        """Strict inequality: cand == current is rejected (no lateral moves)."""
+    def test_tie_with_current_accepts(self) -> None:
+        """cand == current is accepted (>=, not strict >).
+
+        HARDENED: the strict `>` gate rejected every candidate that merely
+        tied the baseline (0.556 hard), so the webintel run could never
+        accept an improvement. Ties are now accepted so the current skill
+        can advance on equal score (soft metric then breaks the tie).
+        """
         result = evaluate_gate(
             candidate_skill="CAND",
             cand_hard=0.5,
@@ -160,8 +166,8 @@ class TestEvaluateGateReject:
             best_step=0,
             global_step=3,
         )
-        assert result.action == "reject"
-        assert result.current_skill == "CURR"
+        assert result.action == "accept"
+        assert result.current_skill == "CAND"
         assert result.best_skill == "BEST"
 
 

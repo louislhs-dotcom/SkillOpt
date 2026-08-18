@@ -1,0 +1,52 @@
+_base_: ../_base_/default.yaml
+env:
+  data_path: ''
+  limit: 0
+  max_completion_tokens: 4096
+  max_turns: 1
+  name: gebiz
+  skill_init: skillopt/envs/gebiz/skills/initial.md
+  split_dir: data/gebiz_split
+  split_mode: split_dir
+  split_output_dir: ''
+  workers: 3
+evaluation:
+  eval_test: false
+  sel_env_num: 5
+  test_env_num: 5
+  use_gate: true
+gradient:
+  analyst_workers: 4
+  failure_only: false
+  merge_batch_size: 5
+  minibatch_size: 5
+model:
+  azure_openai_api_key: ${OLLAMA_API_KEY}
+  azure_openai_auth_mode: openai_compatible
+  azure_openai_endpoint: https://ollama.com/v1
+  backend: openai_compatible
+  optimizer: deepseek-v4-pro:preview
+  optimizer_azure_openai_api_key: ${OLLAMA_API_KEY}
+  optimizer_azure_openai_auth_mode: openai_compatible
+  optimizer_azure_openai_endpoint: https://ollama.com/v1
+  optimizer_backend: openai_compatible
+  reasoning_effort: low
+  extra_body:
+    chat_template_kwargs:
+      thinking: true
+  target: deepseek-v4-pro:preview
+  target_azure_openai_api_key: ${OLLAMA_API_KEY}
+  target_azure_openai_auth_mode: openai_compatible
+  target_azure_openai_endpoint: https://ollama.com/v1
+  target_backend: openai_compatible
+optimizer:
+  learning_rate: 3
+  lr_scheduler: constant
+  use_meta_skill: false
+  use_slow_update: false
+train:
+  accumulation: 1
+  batch_size: 5
+  num_epochs: 2
+  seed: 42
+  train_size: 15
