@@ -89,6 +89,8 @@ class HermesPromptAdapter(EnvAdapter):
         self.minibatch_size = minibatch_size
         self.edit_budget = edit_budget
         self.max_completion_tokens = int(max_completion_tokens)
+        self.reasoning_effort = None
+        self.extra_body = None
         self.dataloader = HermesPromptDataLoader(
             split_dir=split_dir, data_path=data_path, split_mode=split_mode,
             split_ratio=split_ratio, split_seed=split_seed,
@@ -177,6 +179,37 @@ class HermesPromptAdapter(EnvAdapter):
             if hard > 0 and soft <= 0:
                 print(f"    [WARN] {iid}: hard={hard} but soft={soft} — scorer contract broken")
 
+            # ── Telemetry: rich per-item pass/fail signal for the optimizer ──
+            # Mirrors the webintel adapter. The trainer's optimizer consumes
+            # `fail_reason` (grouped by _extract_failure_patterns) and the
+            # analyst reads `criteria_details` to understand WHY an item
+            # failed. Without these, the optimizer sees only a hard 0/1 and
+            # cannot learn what to fix.
+            check_specs = item.get("check") or []
+            matched = sc.get("matched", [])
+            missed = sc.get("missed", [])
+            violations = sc.get("violations", [])
+            criteria_details = [
+                {
+                    "criterion": p.get("pattern", p) if isinstance(p, dict) else p,
+                    "met": (p.get("pattern", p) if isinstance(p, dict) else p) in matched,
+                }
+                for p in check_specs
+            ]
+            # Build a human-readable fail_reason for the optimizer.
+            fail_reason = ""
+            if not hard:
+                reasons = []
+                if missed:
+                    reasons.append(f"missing: {', '.join(missed)}")
+                if violations:
+                    reasons.append(f"forbidden: {', '.join(violations)}")
+                if sc.get("order_score", 1.0) < 1.0:
+                    reasons.append(f"wrong order (order_score={sc.get('order_score', 0):.2f})")
+                if sc.get("length_penalty", 0.0) > 0:
+                    reasons.append(f"too long (length_penalty={sc.get('length_penalty', 0):.2f})")
+                fail_reason = "; ".join(reasons) if reasons else f"soft={soft:.2f} below 1.0"
+
             results.append({
                 "id": iid,
                 "hard": hard,
@@ -184,9 +217,15 @@ class HermesPromptAdapter(EnvAdapter):
                 "response": text[:500],
                 "ground_truth": item.get("ground_truth", "")[:200],
                 "task_type": item.get("task_type", ""),
-                "matched": sc.get("matched", []),
-                "missed": sc.get("missed", []),
-                "violations": sc.get("violations", []),
+                "matched": matched,
+                "missed": missed,
+                "violations": violations,
+                "fail_reason": fail_reason,
+                "criteria_met": len(matched),
+                "criteria_total": len(check_specs),
+                "criteria_details": criteria_details,
+                "order_score": sc.get("order_score", 1.0),
+                "length_penalty": sc.get("length_penalty", 0.0),
             })
 
             with open(os.path.join(pred_dir, "conversation.json"), "w") as f:
@@ -196,14 +235,44 @@ class HermesPromptAdapter(EnvAdapter):
                     {"role": "assistant", "content": text},
                 ], f, indent=2)
 
+        # ── Pass/fail telemetry log (JSONL) for post-hoc analysis ──────────
+        # One line per item: id, task_type, hard/soft, fail_reason, criteria.
+        # This is the raw signal the optimizer and analyst consume to improve
+        # the test AND the training. Written to <out_dir>/telemetry.jsonl.
+        if results:
+            telemetry_path = os.path.join(out_dir, "telemetry.jsonl")
+            with open(telemetry_path, "a") as f:
+                for r in results:
+                    f.write(json.dumps({
+                        "id": r["id"],
+                        "task_type": r["task_type"],
+                        "hard": r["hard"],
+                        "soft": r["soft"],
+                        "fail_reason": r["fail_reason"],
+                        "criteria_met": r["criteria_met"],
+                        "criteria_total": r["criteria_total"],
+                        "order_score": r["order_score"],
+                        "length_penalty": r["length_penalty"],
+                    }, ensure_ascii=False) + "\n")
+
         # Log the batch outcome to TencentDB so Prime/DSH can discover it.
         if results:
             n = len(results)
             hard = sum(1 for r in results if r["hard"])
             soft = sum(r["soft"] for r in results) / n
+            # Include the top failure patterns in the shared-memory write so
+            # Prime/DSH can see what the hermes-prompt loop is struggling with.
+            from collections import Counter
+            fail_counts = Counter(
+                (r["fail_reason"] or "ok").split(";")[0].strip()
+                for r in results if not r["hard"]
+            )
+            top_fails = ", ".join(
+                f"{reason}(x{c})" for reason, c in fail_counts.most_common(3)
+            ) or "none"
             tdai_write_memory(
                 f"hermes-prompt rollout: {hard}/{n} hard, soft={soft:.3f} "
-                f"(out_dir={out_dir})"
+                f"(out_dir={out_dir}); top failures: {top_fails}"
             )
 
         return results
