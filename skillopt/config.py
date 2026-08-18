@@ -127,6 +127,7 @@ _FLATTEN_MAP: dict[str, str] = {
     "optimizer.slow_update_gate_with_selection": "slow_update_gate_with_selection",
     "optimizer.longitudinal_pair_policy": "longitudinal_pair_policy",
     "optimizer.use_meta_skill": "use_meta_skill",
+    "optimizer.veto_growing_candidates": "veto_growing_candidates",
     "optimizer.use_skill_aware_reflection": "use_skill_aware_reflection",
     "optimizer.skill_aware_appendix_source": "skill_aware_appendix_source",
     "optimizer.skill_aware_consolidate_threshold": "skill_aware_consolidate_threshold",

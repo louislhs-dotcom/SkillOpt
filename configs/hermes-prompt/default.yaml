@@ -49,11 +49,11 @@ optimizer:
   lr_scheduler: constant
   use_meta_skill: false
   use_slow_update: false
-# HARD constraint from 100+ steps of evidence: every edit that grew the
-# hermes-prompt skill was rejected by the gate; only shrinking edits landed.
-# When true, any candidate longer than the current skill is auto-rejected
-# without a wasteful selection evaluation.
-veto_growing_candidates: true
+  # HARD constraint from 100+ steps of evidence: every edit that grew the
+  # hermes-prompt skill was rejected by the gate; only shrinking edits landed.
+  # When true, any candidate longer than the current skill is auto-rejected
+  # without a wasteful selection evaluation.
+  veto_growing_candidates: true
 train:
   accumulation: 1
   batch_size: 4
