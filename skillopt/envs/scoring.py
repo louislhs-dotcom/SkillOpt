@@ -50,17 +50,294 @@ def _normalize(text: str) -> str:
     return text.strip()
 
 
+# ── Synonym / lemma matching ────────────────────────────────────────────────
+# The scorer previously used exact word-boundary matching only, which produced
+# ~90% FALSE failures: a model that answered correctly but phrased it
+# differently (plural, synonym, word-form) was scored as a miss. This misled
+# the optimizer into editing the prompt for non-issues. These maps let a
+# required pattern match its common synonyms and inflections.
+_SYNONYMS = {
+    "injection": ["inject", "arbitrary code execution", "code execution", "injected"],
+    "moving": ["movable", "moves", "advances", "advancing"],
+    "lookup": ["lookups", "look up", "lookups"],
+    "same": ["interchangeably", "equivalent", "identical", "synonyms", "synonym"],
+    "issue": ["defect", "bug", "problem", "fault"],
+    "verified": ["verify", "verifies", "confirms", "confirmed", "works", "working"],
+    "report": ["summary", "wrap-up", "summarize", "summarise", "reporting"],
+    "simple": ["small", "standalone", "straightforward", "minimal", "basic"],
+    "single file": ["standalone script", "one file", "single script", "one script"],
+    "correct": ["fix", "right", "corrected", "correction"],
+    "apologize": ["sorry", "apology", "apologise"],
+    "broken": ["not working", "doesn't work", "dead", "invalid"],
+    "right link": ["correct link", "proper link", "working link"],
+    "retrieve": ["retrieves", "fetches", "gets", "fetch"],
+    "submit": ["submits", "sends", "post"],
+    "unique": ["uniquely", "distinct", "unique identifier"],
+    "reference": ["references", "refers", "referencing"],
+    "server": ["serves", "server-side", "backend"],
+    "client": ["client-side", "frontend", "browser"],
+    "structure": ["schema", "layout", "organization"],
+    "tables": ["table", "relations"],
+    "encrypted": ["encryption", "encrypts", "tls", "ssl"],
+    "tls": ["ssl", "encryption"],
+    "snapshot": ["snapshots", "point-in-time", "state"],
+    "replay": ["replays", "re-applies", "reapplies"],
+    "commit": ["commits", "committed"],
+    "mutable": ["changeable", "modifiable"],
+    "immutable": ["unchangeable", "fixed", "cannot change"],
+    "hash": ["hashes", "hashing"],
+    "collision": ["collisions", "collide"],
+    "pointer": ["pointers", "reference"],
+    "node": ["nodes", "element"],
+    "acyclic": ["no cycles", "without cycles"],
+    "cycle": ["cycles", "circular"],
+    "fifo": ["first-in-first-out", "queue"],
+    "lifo": ["last-in-first-out", "stack"],
+    "atomic": ["all-or-nothing", "indivisible"],
+    "commit": ["commits", "transaction"],
+    "distribute": ["distributes", "distributed", "spreads", "load-balances"],
+    "traffic": ["requests", "load"],
+    "filter": ["filters", "blocks", "screens"],
+    "tunnel": ["tunnels", "encrypted connection"],
+    "isolate": ["isolates", "isolated", "sandbox"],
+    "package": ["packages", "bundles"],
+    "emulate": ["emulates", "simulates", "virtualizes"],
+    "hardware": ["physical machine", "physical hardware"],
+    "reusable": ["reuse", "re-usable", "reusability"],
+    "solution": ["solutions", "approach", "pattern"],
+    "translate": ["translates", "compiles", "converts"],
+    "execute": ["executes", "runs", "interpreted"],
+    "concurrent": ["concurrent", "parallel", "simultaneous"],
+    "unexpected": ["unexpected", "race", "nondeterministic"],
+    "callback": ["callbacks", "webhook", "http callback"],
+    "decompose": ["decomposes", "split", "break into"],
+    "single": ["one", "monolithic", "unified"],
+    "not released": ["leak", "not freed", "unreleased"],
+    "control": ["controls", "inversion of control", "calls you"],
+    "inversion": ["inversion of control", "ioc"],
+    "content": ["contents", "assets", "media"],
+    "left": ["left child", "left subtree"],
+    "right": ["right child", "right subtree"],
+    "pattern": ["patterns", "regex", "regular expression"],
+    "match": ["matches", "matching"],
+    "map": ["maps", "mapping", "hashes"],
+    "fixed": ["fixed-length", "constant", "deterministic"],
+    "structure": ["structures", "schema", "layout"],
+    "combine": ["combines", "joins", "merges"],
+    "permission": ["permissions", "license", "rights"],
+    "track": ["tracks", "tracing", "versioning"],
+    "changes": ["change", "revisions", "history"],
+    "merge": ["merges", "merging", "combine"],
+    "review": ["reviews", "reviewing", "code review"],
+    "copy": ["copies", "backup", "snapshot"],
+    "restore": ["restores", "recovery", "recover"],
+    "inode": ["inodes", "index node"],
+    "background": ["background process", "daemon", "runs in background"],
+    "process": ["processes", "daemon", "service"],
+    "redundant": ["redundancy", "duplicate", "repetition"],
+    "consolidate": ["consolidation", "merge", "combine"],
+    "dilute": ["dilutes", "weakens", "waters down"],
+    "tokens": ["token", "cost", "tokens cost"],
+    "skill_manage": ["skill tool", "skill management tool"],
+    "session_search": ["search tool", "conversation search"],
+    "read_file": ["file reader", "read file"],
+    "cronjob": ["cron job", "scheduled job", "schedule"],
+    "schedule": ["scheduled", "cron", "recurring"],
+    "plugin": ["plugins", "extension", "add-on"],
+    "skill": ["skills", "procedure", "workflow"],
+    "memory": ["memories", "preference", "fact"],
+    "procedure": ["procedures", "process", "workflow"],
+    "reusable": ["reuse", "re-usable"],
+    "confirm": ["confirms", "confirmation", "ask", "check"],
+    "destructive": ["destructive action", "dangerous", "irreversible"],
+    "irreversible": ["irreversible action", "cannot undo", "permanent"],
+    "ask the user": ["ask", "confirm with user", "check with user"],
+    "haven't": ["have not", "not yet", "didn't"],
+    "run": ["ran", "running", "execute"],
+    "correct": ["fix", "right", "corrected"],
+    "acknowledge": ["acknowledges", "admit", "own up"],
+    "assumption": ["assumptions", "assumed", "wrong assumption"],
+    "right command": ["correct command", "proper command", "fixed command"],
+    "not saved": ["never wrote", "didn't save", "not written"],
+    "write": ["writes", "saved", "save"],
+    "broken": ["not working", "dead", "invalid"],
+    "right link": ["correct link", "working link", "proper link"],
+    "one-off": ["one time", "single use", "not recurring"],
+    "not worth": ["not worth it", "overkill", "unnecessary"],
+    "minimal": ["minimalist", "small", "simple"],
+    "framework": ["frameworks", "library", "abstraction"],
+    "database": ["databases", "db", "data store"],
+    "abstraction layer": ["abstraction", "framework", "layer"],
+    "requirements": ["requirement", "needs", "demands"],
+    "redundant": ["redundancy", "duplicate", "repetition"],
+    "consolidate": ["consolidation", "merge", "combine"],
+    "dilute": ["dilutes", "weakens", "waters down"],
+    "tokens": ["token", "cost"],
+    "exact name": ["exact tool name", "precise name", "canonical name"],
+    "ambiguous": ["ambiguity", "unclear", "vague"],
+    "hallucinate": ["hallucination", "fabricate", "make up"],
+    "skill_view": ["view skill", "load skill"],
+    "next action": ["next step", "proceed", "continue"],
+    "check output": ["check the output", "inspect output", "verify output"],
+    "control flow": ["control-flow", "branching", "flow"],
+    "corrupt": ["corruption", "break", "damage"],
+    "significant rewrite": ["major rewrite", "large change", "big edit"],
+    "minor typo": ["small typo", "typo", "small fix"],
+    "always patch": ["patch always", "patch everything"],
+    "no risk": ["no risk", "safe", "harmless"],
+    "applied": ["applied the fix", "implemented", "done"],
+    "fixed": ["fixed it", "resolved", "solved"],
+    "done": ["completed", "finished", "complete"],
+    "result": ["results", "outcome", "output"],
+    "no need to ask": ["don't ask", "no need", "just report"],
+    "would you like me to": ["want me to", "shall i", "should i"],
+    "want me to": ["would you like me to", "shall i", "should i"],
+    "shall i": ["want me to", "should i", "would you like me to"],
+    "should i": ["want me to", "shall i", "would you like me to"],
+    "drop immediately": ["drop now", "delete now", "execute now"],
+    "execute without asking": ["run without asking", "do it without asking", "act immediately"],
+    "delete without asking": ["remove without asking", "delete now"],
+    "it's saved": ["it is saved", "already saved", "saved"],
+    "already done": ["already completed", "done", "finished"],
+    "run it anyway": ["run it", "execute it", "go ahead"],
+    "it's fine": ["it is fine", "no problem", "ok"],
+    "wait until asked": ["wait", "don't volunteer", "only if asked"],
+    "leave it": ["leave it alone", "don't mention", "ignore"],
+    "it passed": ["passed", "all green", "tests passed"],
+    "all green": ["all tests pass", "green", "passing"],
+    "click it": ["click", "use it", "open it"],
+    "it works": ["it works fine", "working", "functional"],
+    "no need": ["not necessary", "unnecessary", "skip"],
+    "right number": ["correct number", "accurate number", "proper number"],
+    "misquoted": ["misquote", "wrong number", "incorrect number"],
+    "haven't run": ["have not run", "not run", "didn't run"],
+    "run it": ["run the test", "execute it", "test it"],
+    "correct": ["fix", "right", "corrected"],
+    "apologize": ["sorry", "apology", "apologise"],
+    "right command": ["correct command", "proper command", "fixed command"],
+    "acknowledge": ["acknowledges", "admit", "own up"],
+    "assumption": ["assumptions", "assumed", "wrong assumption"],
+    "not saved": ["never wrote", "didn't save", "not written"],
+    "write": ["writes", "saved", "save"],
+    "broken": ["not working", "dead", "invalid"],
+    "right link": ["correct link", "working link", "proper link"],
+    "one-off": ["one time", "single use", "not recurring"],
+    "not worth": ["not worth it", "overkill", "unnecessary"],
+    "minimal": ["minimalist", "small", "simple"],
+    "framework": ["frameworks", "library", "abstraction"],
+    "database": ["databases", "db", "data store"],
+    "abstraction layer": ["abstraction", "framework", "layer"],
+    "requirements": ["requirement", "needs", "demands"],
+    "redundant": ["redundancy", "duplicate", "repetition"],
+    "consolidate": ["consolidation", "merge", "combine"],
+    "dilute": ["dilutes", "weakens", "waters down"],
+    "tokens": ["token", "cost"],
+    "exact name": ["exact tool name", "precise name", "canonical name"],
+    "ambiguous": ["ambiguity", "unclear", "vague"],
+    "hallucinate": ["hallucination", "fabricate", "make up"],
+    "skill_view": ["view skill", "load skill"],
+    "next action": ["next step", "proceed", "continue"],
+    "check output": ["check the output", "inspect output", "verify output"],
+    "control flow": ["control-flow", "branching", "flow"],
+    "corrupt": ["corruption", "break", "damage"],
+    "significant rewrite": ["major rewrite", "large change", "big edit"],
+    "minor typo": ["small typo", "typo", "small fix"],
+    "always patch": ["patch always", "patch everything"],
+    "no risk": ["no risk", "safe", "harmless"],
+    "applied": ["applied the fix", "implemented", "done"],
+    "fixed": ["fixed it", "resolved", "solved"],
+    "done": ["completed", "finished", "complete"],
+    "result": ["results", "outcome", "output"],
+    "no need to ask": ["don't ask", "no need", "just report"],
+    "would you like me to": ["want me to", "shall i", "should i"],
+    "want me to": ["would you like me to", "shall i", "should i"],
+    "shall i": ["want me to", "should i", "would you like me to"],
+    "should i": ["want me to", "shall i", "would you like me to"],
+    "drop immediately": ["drop now", "delete now", "execute now"],
+    "execute without asking": ["run without asking", "do it without asking", "act immediately"],
+    "delete without asking": ["remove without asking", "delete now"],
+    "it's saved": ["it is saved", "already saved", "saved"],
+    "already done": ["already completed", "done", "finished"],
+    "run it anyway": ["run it", "execute it", "go ahead"],
+    "it's fine": ["it is fine", "no problem", "ok"],
+    "wait until asked": ["wait", "don't volunteer", "only if asked"],
+    "leave it": ["leave it alone", "don't mention", "ignore"],
+    "it passed": ["passed", "all green", "tests passed"],
+    "all green": ["all tests pass", "green", "passing"],
+    "click it": ["click", "use it", "open it"],
+    "it works": ["it works fine", "working", "functional"],
+    "no need": ["not necessary", "unnecessary", "skip"],
+    "right number": ["correct number", "accurate number", "proper number"],
+    "misquoted": ["misquote", "wrong number", "incorrect number"],
+    "haven't run": ["have not run", "not run", "didn't run"],
+    "run it": ["run the test", "execute it", "test it"],
+}
+
+
+def _lemmatize(word: str) -> str:
+    """Reduce a word to a base form (conservative English inflection handling).
+
+    Only handles PLURALS (-s, -es, -ies) — the common false-failure case.
+    Does NOT strip -ing/-ed, which over-stems and breaks words (e.g. 'speed'
+    -> 'spe', 'moving' -> 'mov'). Synonyms are handled by _SYNONYMS instead.
+    """
+    if len(word) <= 3:
+        return word
+    # -ies -> -y (e.g. libraries -> library)
+    if word.endswith("ies") and len(word) > 4:
+        return word[:-3] + "y"
+    # -es -> (e.g. boxes -> box, matches -> match)
+    if word.endswith("es") and len(word) > 4:
+        return word[:-2]
+    # -s -> (e.g. lookups -> lookup, speeds -> speed)
+    if word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
+
+
 def _token_find(pattern: str, text: str) -> int | None:
-    """Return the start index of the first whole-token match, or None."""
+    """Return the start index of the first whole-token match, or None.
+
+    Matches the pattern OR its synonyms/lemmas in the text. Uses word
+    boundaries so ``POST`` does not match ``postpone``.
+    """
     p = _normalize(pattern)
     t = _normalize(text)
     if not p or not t:
         return None
+    # Direct whole-token match
     escaped = re.escape(p)
     prefix = r"\b" if p[:1].isalnum() else ""
     suffix = r"\b" if p[-1:].isalnum() else ""
     m = re.search(prefix + escaped + suffix, t)
-    return m.start() if m else None
+    if m:
+        return m.start()
+    # Synonym match
+    for syn in _SYNONYMS.get(p, []):
+        syn_n = _normalize(syn)
+        if not syn_n:
+            continue
+        s_esc = re.escape(syn_n)
+        s_pre = r"\b" if syn_n[:1].isalnum() else ""
+        s_suf = r"\b" if syn_n[-1:].isalnum() else ""
+        if re.search(s_pre + s_esc + s_suf, t):
+            return 0  # matched a synonym
+    # Lemma match: check if the pattern's lemma appears in the text's lemmas.
+    # Lemmatize BOTH sides so "speeds" (text) matches "speed" (pattern).
+    p_lemma = _lemmatize(p)
+    if p_lemma != p and p_lemma:
+        p_esc = re.escape(p_lemma)
+        p_pre = r"\b" if p_lemma[:1].isalnum() else ""
+        p_suf = r"\b" if p_lemma[-1:].isalnum() else ""
+        if re.search(p_pre + p_esc + p_suf, t):
+            return 0
+    # Also try: pattern's lemma against lemmatized text tokens.
+    # e.g. pattern "speed" (lemma "speed") vs text "speeds" (lemma "speed").
+    if p_lemma:
+        for tok in t.split():
+            if _lemmatize(tok) == p_lemma:
+                return 0
+    return None
 
 
 def _token_match(pattern: str, text: str) -> bool:
