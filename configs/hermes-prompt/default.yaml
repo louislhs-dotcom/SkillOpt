@@ -8,13 +8,14 @@ env:
   skill_init: skillopt/envs/hermes_prompt/skills/initial.md
   split_dir: data/hermes-prompt
   split_mode: split_dir
+  split_ratio: 6:2:2
   split_output_dir: ''
   workers: 3
 evaluation:
   eval_test: false
   gate_metric: soft
-  sel_env_num: 6
-  test_env_num: 4
+  sel_env_num: 19
+  test_env_num: 20
   use_gate: true
 gradient:
   analyst_workers: 4
@@ -50,4 +51,4 @@ train:
   batch_size: 4
   num_epochs: 2
   seed: 42
-  train_size: 15
+  train_size: 57
