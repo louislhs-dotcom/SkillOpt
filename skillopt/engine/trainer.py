@@ -730,6 +730,8 @@ class ReflACTTrainer:
                 optimizer_base_url=cfg.get("optimizer_azure_openai_endpoint") or None,
                 optimizer_api_key=os.path.expandvars(cfg.get("optimizer_azure_openai_api_key") or "") or None,
                 optimizer_model=cfg.get("optimizer_model"),
+                optimizer_reasoning_effort=cfg.get("optimizer_reasoning_effort") or None,
+                optimizer_extra_body=cfg.get("optimizer_extra_body") or None,
                 target_base_url=cfg.get("target_azure_openai_endpoint") or None,
                 target_api_key=os.path.expandvars(cfg.get("target_azure_openai_api_key") or "") or None,
                 target_model=cfg.get("target_model"),

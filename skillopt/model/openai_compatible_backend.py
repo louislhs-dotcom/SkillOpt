@@ -202,9 +202,14 @@ def _chat_messages_impl(
     if reasoning_effort is not None:
         # Some OpenAI-compatible providers (NIM, etc.) support reasoning_effort
         kwargs["reasoning_effort"] = reasoning_effort
-    if extra_body is not None:
+    # Fall back to the role's configured extra_body (e.g. chat_template_kwargs
+    # thinking) when the caller doesn't pass one explicitly. This lets the
+    # optimizer and target roles carry DIFFERENT extra_body (e.g. a thinking
+    # target with a non-thinking optimizer via optimizer_extra_body).
+    eff_extra = extra_body if extra_body is not None else config.extra_body
+    if eff_extra is not None:
         # Ollama Cloud supports chat_template_kwargs.thinking via extra_body
-        kwargs["extra_body"] = extra_body
+        kwargs["extra_body"] = eff_extra
 
     last_err: Exception | None = None
     for attempt in range(retries):
@@ -401,6 +406,8 @@ def configure_openai_compatible(
     optimizer_base_url: str | None = None,
     optimizer_api_key: str | None = None,
     optimizer_model: str | None = None,
+    optimizer_reasoning_effort: str | None = None,
+    optimizer_extra_body: dict[str, Any] | None = None,
     target_base_url: str | None = None,
     target_api_key: str | None = None,
     target_model: str | None = None,
@@ -409,6 +416,9 @@ def configure_openai_compatible(
 
     Shared values apply to both the optimizer and target roles; the
     ``optimizer_*`` / ``target_*`` variants override them per role.
+    ``optimizer_extra_body`` / ``optimizer_reasoning_effort`` let the
+    optimizer role differ from the target (e.g. a thinking model target with
+    a non-thinking optimizer).
     """
     with _config_lock:
         if base_url is not None:
@@ -434,8 +444,8 @@ def configure_openai_compatible(
             temperature=temperature,
             timeout_seconds=timeout_seconds,
             max_tokens=max_tokens,
-            reasoning_effort=reasoning_effort,
-            extra_body=extra_body,
+            reasoning_effort=optimizer_reasoning_effort if optimizer_reasoning_effort is not None else reasoning_effort,
+            extra_body=optimizer_extra_body if optimizer_extra_body is not None else extra_body,
         )
         _update_config(
             TARGET_CONFIG,
