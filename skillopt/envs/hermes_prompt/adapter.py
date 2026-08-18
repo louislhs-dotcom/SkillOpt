@@ -8,12 +8,75 @@ with the hardened score_response() module.
 from __future__ import annotations
 import json
 import os
+<<<<<<< Updated upstream
+=======
+import urllib.request
+>>>>>>> Stashed changes
 from skillopt.datasets.base import BatchSpec
 from skillopt.envs.base import EnvAdapter
 from skillopt.envs.hermes_prompt.dataloader import HermesPromptDataLoader
 from skillopt.envs.scoring import score_response
 
 
+<<<<<<< Updated upstream
+=======
+# ── TDAI Gateway Integration (shared memory with Prime/DSH) ────────────────
+# Mirrors the gebiz adapter: reads shared patterns from TencentDB before
+# rollout, writes run outcomes so any agent in the pipeline can discover them.
+
+TDAI_GATEWAY = "http://127.0.0.1:8420"
+TDAI_NAMESPACE = "hermes-shared-memory"
+
+
+def _tdai_key():
+    path = os.path.expanduser("~/.memory-tencentdb/.gateway-key")
+    with open(path) as f:
+        return f.read().strip()
+
+
+def _tdai_post(path, payload):
+    key = _tdai_key()
+    body = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        f"{TDAI_GATEWAY}{path}",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+            "x-tdai-service-id": TDAI_NAMESPACE,
+        },
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read())
+
+
+def tdai_read_context(query="hermes system prompt conciseness verification no-hallucination"):
+    """Pull shared patterns learned by other agents (Prime/DSH) into the rollout."""
+    try:
+        result = _tdai_post("/v2/atomic/search", {"query": query, "limit": 10})
+        items = result.get("data", {}).get("items", [])
+        if not items:
+            return ""
+        lines = ["[TDAI Shared Memory — patterns learned by other agents]"]
+        for item in items:
+            content = item.get("content", "").strip()
+            if content:
+                lines.append(f"  - {content[:300]}")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+def tdai_write_memory(content):
+    """Log a run outcome so Prime/DSH can discover it."""
+    try:
+        _tdai_post("/v2/core/write", {"content": content, "type": "skillopt-hermes-prompt"})
+        return True
+    except Exception:
+        return False
+
+
+>>>>>>> Stashed changes
 class HermesPromptAdapter(EnvAdapter):
     def __init__(self, split_dir="", data_path="", split_mode="split_dir",
                  split_ratio="2:1:7", split_seed=42, split_output_dir="",
@@ -63,6 +126,14 @@ class HermesPromptAdapter(EnvAdapter):
         results = []
         os.makedirs(os.path.join(out_dir, "predictions"), exist_ok=True)
 
+<<<<<<< Updated upstream
+=======
+        # Pull shared patterns from TencentDB (Prime/DSH) into the rollout.
+        tdai_ctx = tdai_read_context()
+        if tdai_ctx:
+            print(f"  [TDAI] Loaded {len(tdai_ctx)} chars of shared memory context")
+
+>>>>>>> Stashed changes
         system_msg = (
             "You are a Hermes Agent operating under the stable-tier guidance below. "
             "Apply the guidance strictly, then answer the user's request. "
@@ -71,6 +142,11 @@ class HermesPromptAdapter(EnvAdapter):
             f"{skill_content}\n"
             "--- END GUIDANCE ---"
         )
+<<<<<<< Updated upstream
+=======
+        if tdai_ctx:
+            system_msg += f"\n\n{tdai_ctx}"
+>>>>>>> Stashed changes
 
         for item in items:
             iid = item["id"]
@@ -126,6 +202,19 @@ class HermesPromptAdapter(EnvAdapter):
                     {"role": "assistant", "content": text},
                 ], f, indent=2)
 
+<<<<<<< Updated upstream
+=======
+        # Log the batch outcome to TencentDB so Prime/DSH can discover it.
+        if results:
+            n = len(results)
+            hard = sum(1 for r in results if r["hard"])
+            soft = sum(r["soft"] for r in results) / n
+            tdai_write_memory(
+                f"hermes-prompt rollout: {hard}/{n} hard, soft={soft:.3f} "
+                f"(out_dir={out_dir})"
+            )
+
+>>>>>>> Stashed changes
         return results
 
     def get_task_types(self) -> list[str]:
