@@ -8,18 +8,13 @@ with the hardened score_response() module.
 from __future__ import annotations
 import json
 import os
-<<<<<<< Updated upstream
-=======
 import urllib.request
->>>>>>> Stashed changes
 from skillopt.datasets.base import BatchSpec
 from skillopt.envs.base import EnvAdapter
 from skillopt.envs.hermes_prompt.dataloader import HermesPromptDataLoader
 from skillopt.envs.scoring import score_response
 
 
-<<<<<<< Updated upstream
-=======
 # ── TDAI Gateway Integration (shared memory with Prime/DSH) ────────────────
 # Mirrors the gebiz adapter: reads shared patterns from TencentDB before
 # rollout, writes run outcomes so any agent in the pipeline can discover them.
@@ -68,15 +63,20 @@ def tdai_read_context(query="hermes system prompt conciseness verification no-ha
 
 
 def tdai_write_memory(content):
-    """Log a run outcome so Prime/DSH can discover it."""
+    """Log a run outcome so Prime/DSH can discover it.
+
+    Uses the atomic SQLite writer (l1_records + l1_fts) so the write is
+    actually indexed by /v2/atomic/search. The /v2/core/write endpoint writes
+    to a separate core store that atomic search does NOT index — writing there
+    returns 200 but the content is invisible to search (verified 2026-08-18).
+    """
     try:
-        _tdai_post("/v2/core/write", {"content": content, "type": "skillopt-hermes-prompt"})
-        return True
+        from skillopt.envs.tdai_atomic_write import write_skillopt_memory
+        return write_skillopt_memory(content, "skillopt-hermes-prompt")
     except Exception:
         return False
 
 
->>>>>>> Stashed changes
 class HermesPromptAdapter(EnvAdapter):
     def __init__(self, split_dir="", data_path="", split_mode="split_dir",
                  split_ratio="2:1:7", split_seed=42, split_output_dir="",
@@ -126,14 +126,11 @@ class HermesPromptAdapter(EnvAdapter):
         results = []
         os.makedirs(os.path.join(out_dir, "predictions"), exist_ok=True)
 
-<<<<<<< Updated upstream
-=======
         # Pull shared patterns from TencentDB (Prime/DSH) into the rollout.
         tdai_ctx = tdai_read_context()
         if tdai_ctx:
             print(f"  [TDAI] Loaded {len(tdai_ctx)} chars of shared memory context")
 
->>>>>>> Stashed changes
         system_msg = (
             "You are a Hermes Agent operating under the stable-tier guidance below. "
             "Apply the guidance strictly, then answer the user's request. "
@@ -142,11 +139,8 @@ class HermesPromptAdapter(EnvAdapter):
             f"{skill_content}\n"
             "--- END GUIDANCE ---"
         )
-<<<<<<< Updated upstream
-=======
         if tdai_ctx:
             system_msg += f"\n\n{tdai_ctx}"
->>>>>>> Stashed changes
 
         for item in items:
             iid = item["id"]
@@ -202,8 +196,6 @@ class HermesPromptAdapter(EnvAdapter):
                     {"role": "assistant", "content": text},
                 ], f, indent=2)
 
-<<<<<<< Updated upstream
-=======
         # Log the batch outcome to TencentDB so Prime/DSH can discover it.
         if results:
             n = len(results)
@@ -214,7 +206,6 @@ class HermesPromptAdapter(EnvAdapter):
                 f"(out_dir={out_dir})"
             )
 
->>>>>>> Stashed changes
         return results
 
     def get_task_types(self) -> list[str]:
