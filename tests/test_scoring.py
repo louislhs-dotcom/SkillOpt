@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from skillopt.utils.scoring import compute_score, skill_hash
+from skillopt.envs.scoring import score_response
 
 
 class _ResultObject:
@@ -70,6 +71,42 @@ class TestComputeScore:
         hard, soft = compute_score(results)
         assert hard == 0.5
         assert soft == 0.5
+
+
+class TestScoreResponseContract:
+    """score_response — the adapter's scoring contract.
+
+    REGRESSION: the webintel adapter read ``sc.get("score", 0.0)``, but
+    ``score_response`` returns ``soft``/``hard`` and NEVER a ``score`` key.
+    That silently zeroed every soft score (and cascaded into hard via the
+    penalty blocks), so the validation gate rejected every candidate for an
+    entire 32-step run. These tests pin the contract so it can't regress.
+    """
+
+    def test_returns_soft_and_hard_but_no_score_key(self) -> None:
+        sc = score_response("use moli fetch for public pages", check=["moli", "fetch"])
+        assert "soft" in sc
+        assert "hard" in sc
+        # The bug: adapter did sc.get("score", 0.0) -> always 0.0
+        assert "score" not in sc
+        assert sc["soft"] == 1.0
+        assert sc["hard"] == 1.0
+
+    def test_soft_is_graded_not_binary(self) -> None:
+        # 1 of 2 required patterns -> soft 0.5, hard 0.0
+        sc = score_response("use moli", check=["moli", "fetch"])
+        assert sc["soft"] == pytest.approx(0.5)
+        assert sc["hard"] == 0.0
+
+    def test_soft_never_zero_when_any_pattern_matches(self) -> None:
+        sc = score_response("use moli fetch", check=["moli", "fetch", "domstable"])
+        assert sc["soft"] > 0.0
+        assert sc["soft"] == pytest.approx(2 / 3)
+
+    def test_empty_response_scores_zero(self) -> None:
+        sc = score_response("", check=["moli"])
+        assert sc["soft"] == 0.0
+        assert sc["hard"] == 0.0
 
 
 class TestSkillHash:

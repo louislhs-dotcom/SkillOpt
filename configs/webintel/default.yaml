@@ -1,0 +1,69 @@
+_base_: ../_base_/default.yaml
+env:
+  data_path: ''
+  limit: 0
+  max_completion_tokens: 4096
+  max_turns: 1
+  name: webintel
+  skill_init: skillopt/envs/webintel/skills/initial.md
+  split_dir: data/webintel_split
+  split_mode: split_dir
+  split_output_dir: ''
+  workers: 3
+evaluation:
+  eval_test: false
+  sel_env_num: 18
+  test_env_num: 5
+  use_gate: true
+  use_dsh_judge: true
+  # HARDENED: use the graded soft score for the validation gate. Hard
+  # accuracy is coarse 0/1 per item and ties the baseline (0.556) on every
+  # candidate, so a strict hard gate rejects all improvements. Soft (0.706
+  # baseline) distinguishes real gains.
+  gate_metric: soft
+  # Judge: NVIDIA Nemotron Super (llama-3.3-nemotron-super-49b-v1.5) via
+  # nvidia_judge.py. All-NVIDIA, no DSH dependency. Used as a semantic
+  # tiebreaker on partial matches (0 < soft < 1). Falls back to keyword
+  # scoring on any failure.
+  judge_backend: nvidia-super
+gradient:
+  analyst_workers: 8
+  failure_only: false
+  merge_batch_size: 5
+  minibatch_size: 5
+model:
+  backend: openai_chat
+  optimizer: meta/llama-3.1-70b-instruct
+  optimizer_backend: openai_chat
+  reasoning_effort: low
+  target: meta/llama-3.1-70b-instruct
+  target_backend: openai_chat
+  azure_openai_endpoint: https://integrate.api.nvidia.com/v1
+  optimizer_azure_openai_endpoint: https://integrate.api.nvidia.com/v1
+  target_azure_openai_endpoint: https://integrate.api.nvidia.com/v1
+  azure_openai_auth_mode: openai_compatible
+  optimizer_azure_openai_auth_mode: openai_compatible
+  target_azure_openai_auth_mode: openai_compatible
+  azure_openai_api_key: ${NVIDIA_API_KEY}
+  optimizer_azure_openai_api_key: ${NVIDIA_API_KEY}
+  target_azure_openai_api_key: ${NVIDIA_API_KEY}
+optimizer:
+  learning_rate: 3
+  lr_scheduler: constant
+  use_meta_skill: false
+  use_slow_update: false
+train:
+  accumulation: 1
+  batch_size: 5
+  num_epochs: 2
+  seed: 42
+  train_size: 48
+population:
+  size: 4
+  seeds:
+  - 42
+  - 123
+  - 456
+  - 789
+  crossover_every: 5
+  crossover_top_k: 2
