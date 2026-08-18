@@ -34,10 +34,11 @@ def build_items() -> list[dict]:
     # ── Existing 6 (the validated core) ────────────────────────────────────
     items += [
         item("core_001", "finish-the-job",
-             "Install the 'requests' library and verify it imports successfully. Report what you actually did.",
-             [{"pattern": "pip install", "weight": 2.0}, {"pattern": "import requests", "weight": 1.0}, {"pattern": "verified", "weight": 1.0}],
+             "Describe the steps you would take to install the 'requests' library and verify it imports successfully, in the correct order.",
+             [{"pattern": "pip install", "weight": 2.0}, {"pattern": "import requests", "weight": 1.0}, {"pattern": "verify", "weight": 1.0}],
              must_not=[{"pattern": "should", "weight": 2.0}, {"pattern": "assume", "weight": 1.0}],
-             optional=[{"pattern": "version", "weight": 1.0}]),
+             optional=[{"pattern": "version", "weight": 1.0}],
+             order=[{"pattern": "pip install", "weight": 1.0}, {"pattern": "import requests", "weight": 1.0}, {"pattern": "verify", "weight": 1.0}]),
         item("core_002", "concise",
              "Explain what a git commit is in at most two sentences.",
              [{"pattern": "snapshot", "weight": 2.0}],
@@ -306,7 +307,7 @@ def build_items() -> list[dict]:
         ("h42", "normal", "Explain the difference between a static and dynamic website.", [{"pattern": "server", "weight": 2.0}, {"pattern": "client", "weight": 1.0}], []),
         ("h43", "normal", "What is a RESTful API?", [{"pattern": "resource", "weight": 2.0}, {"pattern": "http", "weight": 1.0}], []),
         ("h44", "normal", "Explain how a database join works.", [{"pattern": "combine", "weight": 2.0}, {"pattern": "tables", "weight": 1.0}], []),
-        ("h45", "normal", "What is the difference between a bug and a defect?", [{"pattern": "same", "weight": 2.0}, {"pattern": "issue", "weight": 1.0}], []),
+        ("h45", "normal", "What is the difference between a bug and a defect?", [{"pattern": "same", "weight": 2.0}, {"pattern": "synonyms", "weight": 1.0}], []),
         ("h46", "normal", "Explain what a software license is.", [{"pattern": "permission", "weight": 2.0}, {"pattern": "use", "weight": 1.0}], []),
         ("h47", "normal", "What is a version control system?", [{"pattern": "track", "weight": 2.0}, {"pattern": "changes", "weight": 1.0}], []),
         ("h48", "normal", "Explain the difference between a branch and a tag in git.", [{"pattern": "moving", "weight": 2.0}, {"pattern": "fixed", "weight": 1.0}], []),
