@@ -197,6 +197,20 @@ def evaluate_gate(
         leading_words=leading_words,
     )
 
+    # A candidate byte-identical to the current skill is a no-op (e.g. the
+    # optimizer's edit failed to apply). Accepting it as a "tie" is a false
+    # positive — it records progress that never happened. Reject it so the
+    # loop keeps searching instead of parking on an unchanged prompt.
+    if candidate_skill == current_skill:
+        return GateResult(
+            action="reject",
+            current_skill=current_skill,
+            current_score=current_score,
+            best_skill=best_skill,
+            best_score=best_score,
+            best_step=best_step,
+        )
+
     if cand_score >= current_score:
         if cand_score > best_score:
             return GateResult(

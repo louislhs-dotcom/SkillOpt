@@ -132,11 +132,15 @@ def score_response(
     must_not: Any = None,
     optional: Any = None,
     order: Any = None,
+    max_chars: int | None = None,
 ) -> dict:
     """Score a model response against required / forbidden / bonus / ordered patterns.
 
-    Returns a dict with ``hard`` (0.0 or 1.0), ``soft`` (graded 0.0–1.0),
-    ``matched``, ``missed``, ``violations``, ``order_score``, and ``reason``.
+    ``max_chars`` (optional) applies a conciseness penalty: responses longer
+    than the cap lose up to 0.3 soft (0.1 per 25% over, capped). This lets
+    items reward brevity, not just token presence/absence. Returns a dict with
+    ``hard`` (0.0 or 1.0), ``soft`` (graded 0.0–1.0), ``matched``, ``missed``,
+    ``violations``, ``order_score``, and ``reason``.
     """
     norm = _normalize(text or "")
 
@@ -183,6 +187,15 @@ def score_response(
         bonus_bump = 0.1 * (sum(1 for s in bonus if _token_match(s["pattern"], norm)) / len(bonus))
 
     presence = max(0.0, min(1.0, base - penalty + bonus_bump))
+
+    # Conciseness penalty: reward brevity when a cap is set. Over-length loses
+    # up to 0.3 soft (0.1 per 25% over the cap, capped at 0.3).
+    length_penalty = 0.0
+    if max_chars and max_chars > 0 and len(norm) > max_chars:
+        over = (len(norm) - max_chars) / max_chars
+        length_penalty = min(0.3, 0.1 * (over / 0.25))
+        presence = max(0.0, presence - length_penalty)
+
     order_score = _order_score(norm, order)
     soft = presence * order_score
     hard = 1.0 if soft >= 1.0 else 0.0
@@ -194,6 +207,7 @@ def score_response(
         "missed": missed,
         "violations": violations,
         "order_score": order_score,
+        "length_penalty": length_penalty,
         "reason": "ok",
     }
 

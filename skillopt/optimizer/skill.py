@@ -6,6 +6,7 @@ Analogous to optimizer.step() in neural network training.
 """
 from __future__ import annotations
 
+import difflib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -82,6 +83,38 @@ def _edit_fields(edit: EditType | dict) -> tuple[str, str, str]:
     return op, content, target
 
 
+def _fuzzy_find(skill: str, target: str, cutoff: float = 0.9) -> int | None:
+    """Find a near-exact match for *target* in *skill*.
+
+    Exact substring match is tried first. If that fails, use difflib to find
+    the best-matching window of the same length. This tolerates minor
+    punctuation/whitespace drift between the optimizer's generated target and
+    the actual skill text (e.g. ``(e.g.,`` vs ``(e.g.``), which previously
+    caused a silent no-op (``skipped_replace_target_not_found``) that the gate
+    then accepted as a tie. Returns the start index of the best match, or None.
+    """
+    if not target:
+        return None
+    exact = skill.find(target)
+    if exact != -1:
+        return exact
+    # Only fuzzy-match when the target is long enough to be meaningful.
+    if len(target) < 20:
+        return None
+    n = len(target)
+    best_ratio = 0.0
+    best_idx = None
+    for i in range(0, max(1, len(skill) - n + 1), max(1, n // 4)):
+        window = skill[i : i + n]
+        ratio = difflib.SequenceMatcher(None, target, window).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_idx = i
+    if best_ratio >= cutoff:
+        return best_idx
+    return None
+
+
 def _apply_edit_with_report(skill: str, edit: EditType | dict) -> tuple[str, dict]:
     op, content, target = _edit_fields(edit)
     report = {
@@ -125,21 +158,23 @@ def _apply_edit_with_report(skill: str, edit: EditType | dict) -> tuple[str, dic
         if not target:
             report["status"] = "skipped_replace_missing_target"
             return skill, report
-        if target not in skill:
+        idx = _fuzzy_find(skill, target)
+        if idx is None:
             report["status"] = "skipped_replace_target_not_found"
             return skill, report
         report["status"] = "applied_replace"
-        return skill.replace(target, content, 1), report
+        return skill[:idx] + content + skill[idx + len(target) :], report
 
     if op == "delete":
         if not target:
             report["status"] = "skipped_delete_missing_target"
             return skill, report
-        if target not in skill:
+        idx = _fuzzy_find(skill, target)
+        if idx is None:
             report["status"] = "skipped_delete_target_not_found"
             return skill, report
         report["status"] = "applied_delete"
-        return skill.replace(target, "", 1), report
+        return skill[:idx] + skill[idx + len(target) :], report
 
     report["status"] = "skipped_unknown_op"
     return skill, report

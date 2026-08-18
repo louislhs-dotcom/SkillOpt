@@ -125,6 +125,16 @@ def _register_builtins() -> None:
         _ENV_REGISTRY["swebench"] = SWEBenchAdapter
     except ImportError:
         pass
+    try:
+        from skillopt.envs.hermes_prompt.adapter import HermesPromptAdapter
+        _ENV_REGISTRY["hermes-prompt"] = HermesPromptAdapter
+    except ImportError:
+        pass
+    try:
+        from skillopt.envs.webintel.adapter import WebIntelAdapter
+        _ENV_REGISTRY["webintel"] = WebIntelAdapter
+    except ImportError:
+        pass
 
 
 def get_adapter(cfg: dict):
@@ -459,30 +469,47 @@ def main() -> None:
     print(f"  [skill] {skill_path} ({len(skill_content)} chars)")
 
     # Configure models
-    configure_azure_openai(
-        endpoint=(cfg.get("azure_openai_endpoint") or cfg.get("azure_endpoint") or None),
-        api_version=(cfg.get("azure_openai_api_version") or cfg.get("azure_api_version") or None),
-        api_key=(cfg.get("azure_openai_api_key") or cfg.get("azure_api_key") or None),
-        auth_mode=cfg.get("azure_openai_auth_mode") or None,
-        ad_scope=cfg.get("azure_openai_ad_scope") or None,
-        managed_identity_client_id=cfg.get("azure_openai_managed_identity_client_id") or None,
-        optimizer_endpoint=cfg.get("optimizer_azure_openai_endpoint") or None,
-        optimizer_api_version=cfg.get("optimizer_azure_openai_api_version") or None,
-        optimizer_api_key=cfg.get("optimizer_azure_openai_api_key") or None,
-        optimizer_auth_mode=cfg.get("optimizer_azure_openai_auth_mode") or None,
-        optimizer_ad_scope=cfg.get("optimizer_azure_openai_ad_scope") or None,
-        optimizer_managed_identity_client_id=(
-            cfg.get("optimizer_azure_openai_managed_identity_client_id") or None
-        ),
-        target_endpoint=cfg.get("target_azure_openai_endpoint") or None,
-        target_api_version=cfg.get("target_azure_openai_api_version") or None,
-        target_api_key=cfg.get("target_azure_openai_api_key") or None,
-        target_auth_mode=cfg.get("target_azure_openai_auth_mode") or None,
-        target_ad_scope=cfg.get("target_azure_openai_ad_scope") or None,
-        target_managed_identity_client_id=(
-            cfg.get("target_azure_openai_managed_identity_client_id") or None
-        ),
-    )
+    if backend == "openai_compatible":
+        from skillopt.model.openai_compatible_backend import configure_openai_compatible
+        configure_openai_compatible(
+            base_url=cfg.get("azure_openai_endpoint") or cfg.get("azure_endpoint") or None,
+            api_key=os.path.expandvars(cfg.get("azure_openai_api_key") or cfg.get("azure_api_key") or "") or None,
+            model=cfg.get("optimizer_model"),
+            temperature=cfg.get("qwen_chat_temperature"),
+            max_tokens=cfg.get("qwen_chat_max_tokens"),
+            reasoning_effort=cfg.get("reasoning_effort"),
+            optimizer_base_url=cfg.get("optimizer_azure_openai_endpoint") or None,
+            optimizer_api_key=os.path.expandvars(cfg.get("optimizer_azure_openai_api_key") or "") or None,
+            optimizer_model=cfg.get("optimizer_model"),
+            target_base_url=cfg.get("target_azure_openai_endpoint") or None,
+            target_api_key=os.path.expandvars(cfg.get("target_azure_openai_api_key") or "") or None,
+            target_model=cfg.get("target_model"),
+        )
+    else:
+        configure_azure_openai(
+            endpoint=(cfg.get("azure_openai_endpoint") or cfg.get("azure_endpoint") or None),
+            api_version=(cfg.get("azure_openai_api_version") or cfg.get("azure_api_version") or None),
+            api_key=os.path.expandvars(cfg.get("azure_openai_api_key") or cfg.get("azure_api_key") or "") or None,
+            auth_mode=cfg.get("azure_openai_auth_mode") or None,
+            ad_scope=cfg.get("azure_openai_ad_scope") or None,
+            managed_identity_client_id=cfg.get("azure_openai_managed_identity_client_id") or None,
+            optimizer_endpoint=cfg.get("optimizer_azure_openai_endpoint") or None,
+            optimizer_api_version=cfg.get("optimizer_azure_openai_api_version") or None,
+            optimizer_api_key=os.path.expandvars(cfg.get("optimizer_azure_openai_api_key") or "") or None,
+            optimizer_auth_mode=cfg.get("optimizer_azure_openai_auth_mode") or None,
+            optimizer_ad_scope=cfg.get("optimizer_azure_openai_ad_scope") or None,
+            optimizer_managed_identity_client_id=(
+                cfg.get("optimizer_azure_openai_managed_identity_client_id") or None
+            ),
+            target_endpoint=cfg.get("target_azure_openai_endpoint") or None,
+            target_api_version=cfg.get("target_azure_openai_api_version") or None,
+            target_api_key=os.path.expandvars(cfg.get("target_azure_openai_api_key") or "") or None,
+            target_auth_mode=cfg.get("target_azure_openai_auth_mode") or None,
+            target_ad_scope=cfg.get("target_azure_openai_ad_scope") or None,
+            target_managed_identity_client_id=(
+                cfg.get("target_azure_openai_managed_identity_client_id") or None
+            ),
+        )
     set_optimizer_backend(cfg.get("optimizer_backend", "openai_chat"))
     set_target_backend(cfg.get("target_backend", "openai_chat"))
     set_optimizer_deployment(cfg.get("optimizer_model", default_model_for_backend(backend)))

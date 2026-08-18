@@ -56,6 +56,31 @@ def _register_builtins() -> None:
     except ImportError:
         pass
     try:
+        from skillopt.envs.coding.adapter import CodingAdapter
+        _ENV_REGISTRY["coding"] = CodingAdapter
+    except ImportError:
+        pass
+    try:
+        from skillopt.envs.notebooklm.adapter import NotebookLMAdapter
+        _ENV_REGISTRY["notebooklm"] = NotebookLMAdapter
+    except ImportError:
+        pass
+    try:
+        from skillopt.envs.moli.adapter import MoliAdapter
+        _ENV_REGISTRY["moli"] = MoliAdapter
+    except ImportError:
+        pass
+    try:
+        from skillopt.envs.webintel.adapter import WebIntelAdapter
+        _ENV_REGISTRY["webintel"] = WebIntelAdapter
+    except ImportError:
+        pass
+    try:
+        from skillopt.envs.hermes_prompt.adapter import HermesPromptAdapter
+        _ENV_REGISTRY["hermes-prompt"] = HermesPromptAdapter
+    except ImportError:
+        pass
+    try:
         from skillopt.envs.livemathematicianbench.adapter import LiveMathematicianBenchAdapter
         _ENV_REGISTRY["livemathematicianbench"] = LiveMathematicianBenchAdapter
     except ImportError:
@@ -460,6 +485,7 @@ _LEGACY_TO_STRUCTURED: dict[str, str] = {
     "sel_env_num": "evaluation.sel_env_num",
     "test_env_num": "evaluation.test_env_num",
     "eval_test": "evaluation.eval_test",
+    "use_dsh_judge": "evaluation.use_dsh_judge",
     "env": "env.name",
     "skill_init": "env.skill_init",
     "out_root": "env.out_root",
