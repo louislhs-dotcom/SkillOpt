@@ -67,11 +67,12 @@ def set_optimizer_backend(backend: str) -> None:
         "openai_compatible",
         "copilot_chat",
         "codex_exec",
+        "switchyard",
     }:
         raise ValueError(
             f"Unsupported optimizer backend: {OPTIMIZER_BACKEND!r}. "
             "Supported values are 'openai_chat', 'claude_chat', 'qwen_chat', 'minimax_chat', "
-            "'openai_compatible', 'copilot_chat', and 'codex_exec'."
+            "'openai_compatible', 'copilot_chat', 'codex_exec', and 'switchyard'."
         )
     os.environ["OPTIMIZER_BACKEND"] = OPTIMIZER_BACKEND
 
@@ -83,12 +84,12 @@ def get_optimizer_backend() -> str:
 def set_target_backend(backend: str) -> None:
     global TARGET_BACKEND
     TARGET_BACKEND = normalize_backend_name(backend or "openai_chat")
-    if TARGET_BACKEND not in {"openai_chat", "claude_chat", "qwen_chat", "minimax_chat", "openai_compatible", "copilot_chat", "codex_exec", "claude_code_exec", "cursor_exec", "copilot_exec"}:
+    if TARGET_BACKEND not in {"openai_chat", "claude_chat", "qwen_chat", "minimax_chat", "openai_compatible", "copilot_chat", "codex_exec", "claude_code_exec", "cursor_exec", "copilot_exec", "switchyard"}:
         raise ValueError(
             f"Unsupported target backend: {TARGET_BACKEND!r}. "
             "Supported values are 'openai_chat', 'claude_chat', 'qwen_chat', 'minimax_chat', "
             "'openai_compatible', 'copilot_chat', 'codex_exec', 'claude_code_exec', "
-            "'cursor_exec', and 'copilot_exec'."
+            "'cursor_exec', 'copilot_exec', and 'switchyard'."
         )
     os.environ["TARGET_BACKEND"] = TARGET_BACKEND
 
@@ -110,11 +111,12 @@ def is_optimizer_chat_backend() -> bool:
         "openai_compatible",
         "copilot_chat",
         "codex_exec",
+        "switchyard",
     }
 
 
 def is_target_chat_backend() -> bool:
-    return TARGET_BACKEND in {"openai_chat", "claude_chat", "qwen_chat", "minimax_chat", "openai_compatible", "copilot_chat"}
+    return TARGET_BACKEND in {"openai_chat", "claude_chat", "qwen_chat", "minimax_chat", "openai_compatible", "copilot_chat", "switchyard"}
 
 
 def configure_codex_exec(

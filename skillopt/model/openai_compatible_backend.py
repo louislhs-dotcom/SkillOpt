@@ -54,6 +54,8 @@ class OpenAICompatibleConfig:
     timeout_seconds: float
     max_tokens: int
     temperature: float | None
+    reasoning_effort: str | None
+    extra_body: dict[str, Any] | None
 
 
 def _parse_optional_float(value: Any) -> float | None:
@@ -92,6 +94,8 @@ def _initial_config(role: str) -> OpenAICompatibleConfig:
         timeout_seconds=float(_role_env(role, "TIMEOUT_SECONDS", "300") or 300),
         max_tokens=_parse_int(_role_env(role, "MAX_TOKENS", "8000"), 8000),
         temperature=_parse_optional_float(_role_env(role, "TEMPERATURE", "")),
+        reasoning_effort=_role_env(role, "REASONING_EFFORT", "") or None,
+        extra_body=None,  # extra_body is complex, set via configure() or per-call
     )
 
 
@@ -175,6 +179,8 @@ def _chat_messages_impl(
     return_message: bool = False,
     deployment: str | None = None,
     timeout: float | None = None,
+    reasoning_effort: str | None = None,
+    extra_body: dict[str, Any] | None = None,
 ) -> tuple[Any, dict[str, int]]:
     config = _config_for(role)
     client = _get_client(role)
@@ -193,6 +199,12 @@ def _chat_messages_impl(
             kwargs["tool_choice"] = tool_choice
     if timeout is not None:
         kwargs["timeout"] = timeout
+    if reasoning_effort is not None:
+        # Some OpenAI-compatible providers (NIM, etc.) support reasoning_effort
+        kwargs["reasoning_effort"] = reasoning_effort
+    if extra_body is not None:
+        # Ollama Cloud supports chat_template_kwargs.thinking via extra_body
+        kwargs["extra_body"] = extra_body
 
     last_err: Exception | None = None
     for attempt in range(retries):
@@ -233,8 +245,8 @@ def chat_optimizer(
     stage: str = "optimizer",
     reasoning_effort: str | None = None,
     timeout: float | None = None,
+    extra_body: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, int]]:
-    del reasoning_effort  # not forwarded — kept for a uniform signature
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
@@ -246,6 +258,8 @@ def chat_optimizer(
         stage,
         role="optimizer",
         timeout=timeout,
+        reasoning_effort=reasoning_effort,
+        extra_body=extra_body,
     )
 
 
@@ -257,8 +271,8 @@ def chat_target(
     stage: str = "target",
     reasoning_effort: str | None = None,
     timeout: float | None = None,
+    extra_body: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, int]]:
-    del reasoning_effort
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
@@ -270,6 +284,8 @@ def chat_target(
         stage,
         role="target",
         timeout=timeout,
+        reasoning_effort=reasoning_effort,
+        extra_body=extra_body,
     )
 
 
@@ -284,8 +300,8 @@ def chat_optimizer_messages(
     tool_choice: str | dict[str, Any] | None = None,
     return_message: bool = False,
     timeout: float | None = None,
+    extra_body: dict[str, Any] | None = None,
 ) -> tuple[Any, dict[str, int]]:
-    del reasoning_effort
     return _chat_messages_impl(
         messages,
         max_completion_tokens,
@@ -296,6 +312,8 @@ def chat_optimizer_messages(
         tool_choice=tool_choice,
         return_message=return_message,
         timeout=timeout,
+        reasoning_effort=reasoning_effort,
+        extra_body=extra_body,
     )
 
 
@@ -310,8 +328,8 @@ def chat_target_messages(
     tool_choice: str | dict[str, Any] | None = None,
     return_message: bool = False,
     timeout: float | None = None,
+    extra_body: dict[str, Any] | None = None,
 ) -> tuple[Any, dict[str, int]]:
-    del reasoning_effort
     return _chat_messages_impl(
         messages,
         max_completion_tokens,
@@ -322,6 +340,8 @@ def chat_target_messages(
         tool_choice=tool_choice,
         return_message=return_message,
         timeout=timeout,
+        reasoning_effort=reasoning_effort,
+        extra_body=extra_body,
     )
 
 
@@ -338,6 +358,8 @@ def _update_config(
     temperature: float | str | None = None,
     timeout_seconds: float | str | None = None,
     max_tokens: int | str | None = None,
+    reasoning_effort: str | None = None,
+    extra_body: dict[str, Any] | None = None,
 ) -> None:
     env_prefix = role.upper()
     if base_url is not None:
@@ -359,6 +381,11 @@ def _update_config(
     if max_tokens is not None:
         config.max_tokens = int(max_tokens)
         os.environ[f"{env_prefix}_OPENAI_COMPATIBLE_MAX_TOKENS"] = str(max_tokens)
+    if reasoning_effort is not None:
+        config.reasoning_effort = str(reasoning_effort).strip() or None
+        os.environ[f"{env_prefix}_OPENAI_COMPATIBLE_REASONING_EFFORT"] = str(reasoning_effort).strip()
+    if extra_body is not None:
+        config.extra_body = extra_body
 
 
 def configure_openai_compatible(
@@ -369,6 +396,8 @@ def configure_openai_compatible(
     temperature: float | str | None = None,
     timeout_seconds: float | str | None = None,
     max_tokens: int | str | None = None,
+    reasoning_effort: str | None = None,
+    extra_body: dict[str, Any] | None = None,
     optimizer_base_url: str | None = None,
     optimizer_api_key: str | None = None,
     optimizer_model: str | None = None,
@@ -394,6 +423,8 @@ def configure_openai_compatible(
             os.environ["OPENAI_COMPATIBLE_TIMEOUT_SECONDS"] = str(timeout_seconds)
         if max_tokens is not None:
             os.environ["OPENAI_COMPATIBLE_MAX_TOKENS"] = str(max_tokens)
+        if reasoning_effort is not None:
+            os.environ["OPENAI_COMPATIBLE_REASONING_EFFORT"] = str(reasoning_effort).strip()
         _update_config(
             OPTIMIZER_CONFIG,
             "optimizer",
@@ -403,6 +434,8 @@ def configure_openai_compatible(
             temperature=temperature,
             timeout_seconds=timeout_seconds,
             max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
+            extra_body=extra_body,
         )
         _update_config(
             TARGET_CONFIG,
@@ -413,6 +446,8 @@ def configure_openai_compatible(
             temperature=temperature,
             timeout_seconds=timeout_seconds,
             max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
+            extra_body=extra_body,
         )
     _reset_clients()
 
@@ -430,9 +465,17 @@ def reset_token_tracker() -> None:
 
 
 def set_reasoning_effort(effort: str | None) -> None:
-    # Reasoning effort is provider-specific and not universally supported by
-    # OpenAI-compatible endpoints, so it is intentionally a no-op here.
-    del effort
+    """Set default reasoning_effort for both optimizer and target configs."""
+    with _config_lock:
+        if effort is not None:
+            OPTIMIZER_CONFIG.reasoning_effort = effort
+            TARGET_CONFIG.reasoning_effort = effort
+            os.environ["OPENAI_COMPATIBLE_REASONING_EFFORT"] = str(effort).strip()
+        else:
+            OPTIMIZER_CONFIG.reasoning_effort = None
+            TARGET_CONFIG.reasoning_effort = None
+            os.environ.pop("OPENAI_COMPATIBLE_REASONING_EFFORT", None)
+    _reset_clients()
 
 
 def set_target_deployment(deployment: str) -> None:

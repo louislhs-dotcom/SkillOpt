@@ -35,6 +35,7 @@ _FLATTEN_MAP: dict[str, str] = {
     "model.optimizer_backend": "optimizer_backend",
     "model.target_backend": "target_backend",
     "model.reasoning_effort": "reasoning_effort",
+    "model.extra_body": "extra_body",
     "model.rewrite_reasoning_effort": "rewrite_reasoning_effort",
     "model.rewrite_max_completion_tokens": "rewrite_max_completion_tokens",
     "model.codex_exec_path": "codex_exec_path",

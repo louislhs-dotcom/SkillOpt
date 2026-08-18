@@ -701,28 +701,62 @@ class ReflACTTrainer:
 
         # ── Configure models ─────────────────────────────────────────────
         backend = cfg.get("model_backend", "azure_openai")
-        configure_azure_openai(
-            endpoint=(
-                cfg.get("azure_openai_endpoint")
-                or cfg.get("azure_endpoint")
-                or None
-            ),
-            api_version=(
-                cfg.get("azure_openai_api_version")
-                or cfg.get("azure_api_version")
-                or None
-            ),
-            api_key=(
-                cfg.get("azure_openai_api_key")
-                or cfg.get("azure_api_key")
-                or None
-            ),
-            auth_mode=cfg.get("azure_openai_auth_mode") or None,
-            ad_scope=cfg.get("azure_openai_ad_scope") or None,
-            managed_identity_client_id=cfg.get("azure_openai_managed_identity_client_id") or None,
-            optimizer_endpoint=cfg.get("optimizer_azure_openai_endpoint") or None,
+
+        if backend == "switchyard":
+            # Switchyard native server with intelligent routing
+            from skillopt.model.switchyard_backend import configure_switchyard
+            configure_switchyard(
+                config_path=cfg.get("switchyard_config", "configs/switchyard_skillopt.toml"),
+                optimizer_route=cfg.get("switchyard_optimizer_route", "nemotron"),
+                target_route=cfg.get("switchyard_target_route", "llama70b"),
+                timeouts=cfg.get("switchyard_timeouts"),
+                max_retries=cfg.get("switchyard_max_retries", 3),
+                request_delay=float(cfg.get("switchyard_request_delay", 0.0) or 0.0),
+            )
+            # Set backend names for the rest of the code
+            cfg["optimizer_backend"] = "switchyard"
+            cfg["target_backend"] = "switchyard"
+            set_optimizer_backend("switchyard")
+            set_target_backend("switchyard")
+        elif backend == "openai_compatible":
+            from skillopt.model.openai_compatible_backend import configure_openai_compatible
+            configure_openai_compatible(
+                base_url=cfg.get("azure_openai_endpoint") or cfg.get("azure_endpoint") or None,
+                api_key=cfg.get("azure_openai_api_key") or cfg.get("azure_api_key") or None,
+                model=cfg.get("optimizer_model"),
+                temperature=cfg.get("qwen_chat_temperature"),
+                max_tokens=cfg.get("qwen_chat_max_tokens"),
+                reasoning_effort=cfg.get("reasoning_effort"),
+                optimizer_base_url=cfg.get("optimizer_azure_openai_endpoint") or None,
+                optimizer_api_key=os.path.expandvars(cfg.get("optimizer_azure_openai_api_key") or "") or None,
+                optimizer_model=cfg.get("optimizer_model"),
+                target_base_url=cfg.get("target_azure_openai_endpoint") or None,
+                target_api_key=os.path.expandvars(cfg.get("target_azure_openai_api_key") or "") or None,
+                target_model=cfg.get("target_model"),
+            )
+        else:
+            configure_azure_openai(
+                endpoint=(
+                    cfg.get("azure_openai_endpoint")
+                    or cfg.get("azure_endpoint")
+                    or None
+                ),
+                api_version=(
+                    cfg.get("azure_openai_api_version")
+                    or cfg.get("azure_api_version")
+                    or None
+                ),
+                api_key=(
+                    cfg.get("azure_openai_api_key")
+                    or cfg.get("azure_api_key")
+                    or None
+                ),
+                auth_mode=cfg.get("azure_openai_auth_mode") or None,
+                ad_scope=cfg.get("azure_openai_ad_scope") or None,
+                managed_identity_client_id=cfg.get("azure_openai_managed_identity_client_id") or None,
+                optimizer_endpoint=cfg.get("optimizer_azure_openai_endpoint") or None,
             optimizer_api_version=cfg.get("optimizer_azure_openai_api_version") or None,
-            optimizer_api_key=cfg.get("optimizer_azure_openai_api_key") or None,
+            optimizer_api_key=os.path.expandvars(cfg.get("optimizer_azure_openai_api_key") or "") or None,
             optimizer_auth_mode=cfg.get("optimizer_azure_openai_auth_mode") or None,
             optimizer_ad_scope=cfg.get("optimizer_azure_openai_ad_scope") or None,
             optimizer_managed_identity_client_id=(
@@ -730,13 +764,14 @@ class ReflACTTrainer:
             ),
             target_endpoint=cfg.get("target_azure_openai_endpoint") or None,
             target_api_version=cfg.get("target_azure_openai_api_version") or None,
-            target_api_key=cfg.get("target_azure_openai_api_key") or None,
+            target_api_key=os.path.expandvars(cfg.get("target_azure_openai_api_key") or "") or None,
             target_auth_mode=cfg.get("target_azure_openai_auth_mode") or None,
             target_ad_scope=cfg.get("target_azure_openai_ad_scope") or None,
             target_managed_identity_client_id=(
                 cfg.get("target_azure_openai_managed_identity_client_id") or None
             ),
-        )
+            )
+
         optimizer_backend, target_backend = _resolve_role_backends(
             backend, cfg.get("optimizer_backend"), cfg.get("target_backend")
         )
@@ -808,6 +843,12 @@ class ReflACTTrainer:
         minimax_model_cfg = cfg.get("minimax_model")
         if minimax_model_cfg and cfg.get("target_backend") == "minimax_chat":
             set_target_deployment(str(minimax_model_cfg))
+        
+        # Store Switchyard backend reference for telemetry
+        _sy_backend = None
+        if backend == "switchyard":
+            from skillopt.model.switchyard_backend import _get_switchyard_backend
+            _sy_backend = _get_switchyard_backend()
         os.environ["REFLACT_CODEX_TRACE_TO_OPTIMIZER"] = (
             "1"
             if target_backend == "codex_exec" and cfg.get("codex_trace_to_optimizer", False)
@@ -2463,6 +2504,17 @@ class ReflACTTrainer:
                 f"    [3] final/last skill             : "
                 f"test_hard={final_test_hard:.4f} test_soft={final_test_soft:.4f}"
             )
+
+        # Switchyard telemetry
+        if _sy_backend is not None:
+            print(f"\n{'='*60}")
+            print("  Switchyard Telemetry")
+            print(f"{'='*60}")
+            _sy_backend.log_summary()
+            # Export telemetry JSONL
+            telemetry_path = os.path.join(out_root, "switchyard_telemetry.jsonl")
+            _sy_backend.export_telemetry(telemetry_path)
+            print(f"  Exported: {telemetry_path}")
         if token_summary.get("_total"):
             t = token_summary["_total"]
             print(

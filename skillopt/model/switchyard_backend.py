@@ -176,6 +176,7 @@ class SwitchyardBackend:
     # Retry config
     MAX_RETRIES = 3
     BASE_BACKOFF = 2.0  # seconds
+    RATE_LIMIT_BACKOFF = 15.0  # seconds — longer wait for 429 rate limits
     
     def __init__(
         self,
@@ -185,6 +186,7 @@ class SwitchyardBackend:
         target_route: str = "llama70b",
         timeouts: Optional[dict[str, int]] = None,
         max_retries: int = 3,
+        request_delay: float = 0.0,
     ):
         self.config_path = Path(config_path).expanduser().resolve()
         self.default_route = default_route
@@ -192,6 +194,9 @@ class SwitchyardBackend:
         self.target_route = target_route
         self.timeouts = {**self.DEFAULT_TIMEOUTS, **(timeouts or {})}
         self.max_retries = max_retries
+        # Inter-request pacing delay (seconds) to avoid upstream rate limits.
+        self.request_delay = request_delay
+        self._last_was_429 = False
         
         self.server = None
         self.base_url = None
@@ -278,6 +283,12 @@ class SwitchyardBackend:
                 error_body = e.read().decode() if e.fp else str(e)
                 last_error = f"HTTP {e.code}: {error_body}"
                 logger.warning(f"Switchyard HTTP {e.code} (attempt {attempt}/{self.max_retries}): {error_body[:200]}")
+                # Rate-limit (429) needs a much longer backoff than transient
+                # errors — the upstream quota resets on a longer timescale.
+                if e.code == 429:
+                    self._last_was_429 = True
+                else:
+                    self._last_was_429 = False
                 
             except error.URLError as e:
                 latency_ms = (time.time() - start) * 1000
@@ -304,10 +315,15 @@ class SwitchyardBackend:
                 stage=stage,
             )
             
-            # Exponential backoff
+            # Exponential backoff — longer for rate-limit (429) errors
             if attempt < self.max_retries:
-                backoff = self.BASE_BACKOFF * (2 ** (attempt - 1))
-                logger.info(f"Retrying in {backoff}s...")
+                if getattr(self, "_last_was_429", False):
+                    # Rate limit: wait longer (quota resets on a longer scale)
+                    backoff = self.RATE_LIMIT_BACKOFF * (2 ** (attempt - 1))
+                    logger.info(f"Rate-limited (429); retrying in {backoff}s...")
+                else:
+                    backoff = self.BASE_BACKOFF * (2 ** (attempt - 1))
+                    logger.info(f"Retrying in {backoff}s...")
                 time.sleep(backoff)
         
         # All retries exhausted
@@ -350,6 +366,10 @@ class SwitchyardBackend:
         payload.update(kwargs)
         
         url = f"{self.base_url}/v1/chat/completions"
+        
+        # Pace requests to avoid upstream rate limits (429).
+        if self.request_delay > 0:
+            time.sleep(self.request_delay)
         
         return self._make_request_with_retry(url, payload, timeout, route, messages, stage)
     
@@ -396,6 +416,7 @@ def configure_switchyard(
     target_route: str = "llama70b",
     timeouts: Optional[dict[str, int]] = None,
     max_retries: int = 3,
+    request_delay: float = 0.0,
 ) -> SwitchyardBackend:
     """Configure SkillOpt to use Switchyard backend.
     
@@ -407,6 +428,7 @@ def configure_switchyard(
         target_route: Route for target/rollout (fast model)
         timeouts: Per-route timeout overrides (seconds)
         max_retries: Max retry attempts per request
+        request_delay: Inter-request pacing delay (seconds) to avoid 429s
         
     Returns:
         Started SwitchyardBackend instance
@@ -418,6 +440,7 @@ def configure_switchyard(
         target_route=target_route,
         timeouts=timeouts,
         max_retries=max_retries,
+        request_delay=request_delay,
     )
     backend.start()
     

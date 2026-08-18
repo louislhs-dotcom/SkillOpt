@@ -1,0 +1,82 @@
+name: skillopt-training
+description: SkillOpt training with Switchyard routing and telemetry
+
+# Workflow template for SkillOpt population training
+stages:
+  - name: setup
+    description: Prepare environment and verify config
+    steps:
+      - name: check_nvidia_key
+        run: |
+          if [ -z "$NVIDIA_API_KEY" ]; then
+            echo "ERROR: NVIDIA_API_KEY not set"
+            exit 1
+          fi
+          echo "NVIDIA_API_KEY verified"
+
+      - name: check_configs
+        run: |
+          test -f configs/switchyard_skillopt.toml && echo "Switchyard config OK"
+          test -f configs/webintel/switchyard.yaml && echo "Trainer config OK"
+
+      - name: check_initial_skill
+        run: |
+          if [ -z "$INITIAL_SKILL" ]; then
+            echo "ERROR: INITIAL_SKILL not set"
+            exit 1
+          fi
+          test -f "$INITIAL_SKILL" && echo "Initial skill: $INITIAL_SKILL"
+
+  - name: training
+    description: Run population training with crossover
+    parallel: true
+    max_agents: 4
+    steps:
+      - name: population_training
+        run: |
+          python3 scripts/population_train.py \
+            --config configs/webintel/switchyard.yaml \
+            --skill-init "$INITIAL_SKILL" \
+            --population 4 \
+            --seeds 42 123 456 789 \
+            --steps-per-chunk 5 \
+            --chunks 4 \
+            --workers 4 \
+            --out-root outputs/population_$(date +%Y%m%d_%H%M%S) \
+            --elite-keep 1 \
+            --crossover-top-k 2 \
+            --max-cross-edits 3
+
+  - name: results
+    description: Collect and summarize results
+    steps:
+      - name: find_latest_output
+        run: |
+          LATEST=$(ls -td outputs/population_* | head -1)
+          echo "Latest run: $LATEST"
+          
+      - name: show_best_skill
+        run: |
+          LATEST=$(ls -td outputs/population_* | head -1)
+          if [ -f "$LATEST/population_best_skill.md" ]; then
+            echo "=== Best Skill ==="
+            head -50 "$LATEST/population_best_skill.md"
+          fi
+
+      - name: show_history
+        run: |
+          LATEST=$(ls -td outputs/population_* | head -1)
+          if [ -f "$LATEST/population_history.json" ]; then
+            echo "=== Population History ==="
+            cat "$LATEST/population_history.json" | python3 -m json.tool
+          fi
+
+      - name: show_telemetry
+        run: |
+          LATEST=$(ls -td outputs/population_* | head -1)
+          for dir in $LATEST/pop_*/; do
+            if [ -f "$dir/switchyard_telemetry.jsonl" ]; then
+              echo "=== Telemetry: $(basename $dir) ==="
+              tail -20 "$dir/switchyard_telemetry.jsonl" | python3 -m json.tool
+            fi
+          done
