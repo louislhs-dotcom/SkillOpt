@@ -8,7 +8,7 @@ env:
   skill_init: skillopt/envs/hermes_prompt/skills/initial.md
   split_dir: data/hermes-prompt
   split_mode: split_dir
-  split_ratio: 6:2:2
+  split_ratio: "6:2:2"
   split_output_dir: ''
   workers: 3
 evaluation:
