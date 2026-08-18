@@ -162,6 +162,20 @@ class HermesPromptAdapter(EnvAdapter):
             except Exception as e:
                 text = f"ERROR: {e}"
 
+            # ── Harden: classify degenerate responses before scoring ────────
+            # An empty/None/whitespace response or a model-call ERROR must be
+            # surfaced as a distinct failure, not silently scored as a generic
+            # "soft below 1.0". This is the difference between "the model gave
+            # a wrong answer" (fixable by prompt) and "the harness broke"
+            # (fixable by infra) — the optimizer must not conflate them.
+            stripped = (text or "").strip()
+            if not stripped:
+                text = "ERROR: empty response from target model"
+            elif stripped.startswith("ERROR:"):
+                pass  # already an error marker; scorer handles it
+            elif stripped.lower().startswith("error:"):
+                text = "ERROR:" + stripped[len("error:"):]
+
             # Hardened scorer. CRITICAL: read sc["soft"], NOT sc["score"].
             sc = score_response(
                 text,
@@ -200,11 +214,20 @@ class HermesPromptAdapter(EnvAdapter):
             fail_reason = ""
             if not hard:
                 reasons = []
+                # Surface harness/infra failures distinctly from wrong answers.
+                if stripped.startswith("ERROR:"):
+                    reasons.append(f"harness_error: {stripped[len('ERROR:'):].strip()[:120]}")
+                elif not stripped:
+                    reasons.append("empty_response")
                 if missed:
                     reasons.append(f"missing: {', '.join(missed)}")
                 if violations:
                     reasons.append(f"forbidden: {', '.join(violations)}")
-                if sc.get("order_score", 1.0) < 1.0:
+                # Only report wrong-order when there IS an order constraint AND
+                # the response is not an error/empty (the scorer's error branch
+                # returns order_score=0.0 spuriously — a false positive).
+                has_order = bool(item.get("order"))
+                if has_order and not stripped.startswith("ERROR:") and sc.get("order_score", 1.0) < 1.0:
                     reasons.append(f"wrong order (order_score={sc.get('order_score', 0):.2f})")
                 if sc.get("length_penalty", 0.0) > 0:
                     reasons.append(f"too long (length_penalty={sc.get('length_penalty', 0):.2f})")
@@ -240,10 +263,13 @@ class HermesPromptAdapter(EnvAdapter):
         # This is the raw signal the optimizer and analyst consume to improve
         # the test AND the training. Written to <out_dir>/telemetry.jsonl.
         if results:
+            import time as _time
+            ts = _time.strftime("%Y-%m-%dT%H:%M:%S")
             telemetry_path = os.path.join(out_dir, "telemetry.jsonl")
             with open(telemetry_path, "a") as f:
                 for r in results:
                     f.write(json.dumps({
+                        "ts": ts,
                         "id": r["id"],
                         "task_type": r["task_type"],
                         "hard": r["hard"],
@@ -270,10 +296,12 @@ class HermesPromptAdapter(EnvAdapter):
             top_fails = ", ".join(
                 f"{reason}(x{c})" for reason, c in fail_counts.most_common(3)
             ) or "none"
-            tdai_write_memory(
+            wrote = tdai_write_memory(
                 f"hermes-prompt rollout: {hard}/{n} hard, soft={soft:.3f} "
                 f"(out_dir={out_dir}); top failures: {top_fails}"
             )
+            if not wrote:
+                print(f"    [WARN] TDAI write failed for {out_dir} — shared memory not updated")
 
         return results
 
