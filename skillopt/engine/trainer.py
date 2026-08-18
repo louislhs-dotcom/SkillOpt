@@ -170,7 +170,13 @@ def _normalise_patches(
         items = get_payload_items(inner, mode)
         if not items:
             continue
-        support = max(int(p.get("batch_size", 0) or 0), 1)
+        # The optimizer occasionally emits a malformed batch_size (e.g. a
+        # template artifact like "number>"). Never let that crash the run —
+        # default to 1 on any non-integer value.
+        try:
+            support = max(int(float(p.get("batch_size", 0) or 0)), 1)
+        except (TypeError, ValueError):
+            support = 1
         for item in items:
             if isinstance(item, dict):
                 item.setdefault("source_type", p.get("source_type", "failure"))
