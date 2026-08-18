@@ -1492,6 +1492,33 @@ class ReflACTTrainer:
                 cand_hash = skill_hash(candidate_skill)
                 step_rec["candidate_hash"] = cand_hash
                 step_rec["candidate_skill_len"] = len(candidate_skill)
+
+                # HARD VETO: if the candidate grew the skill, auto-reject without
+                # evaluating. Empirical evidence across 100+ steps is conclusive:
+                # every edit that grew the hermes-prompt skill was rejected by the
+                # gate; only shrinking edits were accepted. This saves the wasted
+                # selection evaluation and prevents verbosity from ever landing.
+                if cfg.get("veto_growing_candidates") and len(candidate_skill) > len(current_skill):
+                    step_rec["action"] = "reject"
+                    step_rec["reject_reason"] = "veto_growing_candidate"
+                    step_rec["current_score"] = current_score
+                    step_rec["best_score"] = best_score
+                    step_rec["best_step"] = best_step
+                    step_rec["skill_len"] = len(current_skill)
+                    step_rec["wall_time_s"] = round(time.time() - step_t0, 1)
+                    history.append(step_rec)
+                    _save_history(out_root, history)
+                    _save_skill(out_root, global_step, current_skill)
+                    _persist_runtime_state(global_step)
+                    with open(os.path.join(step_dir, "step_record.json"), "w") as f:
+                        json.dump(step_rec, f, indent=2, ensure_ascii=False)
+                    print(
+                        f"    [VETO] candidate grew skill "
+                        f"{len(current_skill)} -> {len(candidate_skill)}; "
+                        f"auto-rejected (veto_growing_candidates)"
+                    )
+                    continue
+
                 if rewrite_result:
                     step_rec["rewrite_change_summary"] = rewrite_result.get("change_summary", [])
                 if apply_report:
