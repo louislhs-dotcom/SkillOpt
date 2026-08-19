@@ -208,23 +208,67 @@ def main():
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--core", default="skillopt/envs/hermes_prompt/skills/core_baseline.md")
     ap.add_argument("--addendum", default="skillopt/envs/hermes_prompt/skills/addendum_init.md")
+    ap.add_argument("--runs", type=int, default=3,
+                    help="Number of passes to average over (run-to-run variance is high; default 3)")
     args = ap.parse_args()
 
-    r_core = run(args.model, build_system(args.core, args.addendum, False))
-    r_add = run(args.model, build_system(args.core, args.addendum, True))
-    out = {"core_only": r_core, "core_plus_addendum": r_add, "delta": round(r_add["score"] - r_core["score"], 3)}
+    # ── Multi-run averaging: run each config `--runs` times, average scores ──
+    # Single-pass deltas are unreliable (model stochasticity / empty responses),
+    # so we report the MEAN across runs plus the per-scenario pass rate.
+    core_scores = []
+    add_scores = []
+    # per-scenario pass counts across runs
+    from collections import Counter
+    core_passes = Counter()
+    add_passes = Counter()
+
+    core_sys = build_system(args.core, args.addendum, False)
+    add_sys = build_system(args.core, args.addendum, True)
+    for i in range(args.runs):
+        rc = run(args.model, core_sys)
+        ra = run(args.model, add_sys)
+        core_scores.append(rc["score"])
+        add_scores.append(ra["score"])
+        for r in rc["results"]:
+            if r["pass"]:
+                core_passes[r["id"]] += 1
+        for r in ra["results"]:
+            if r["pass"]:
+                add_passes[r["id"]] += 1
+
+    def mean(xs):
+        return round(sum(xs) / len(xs), 3) if xs else 0.0
+
+    core_mean, add_mean = mean(core_scores), mean(add_scores)
+    delta = round(add_mean - core_mean, 3)
+
+    out = {
+        "model": args.model,
+        "runs": args.runs,
+        "core_only": {"mean": core_mean, "scores": core_scores},
+        "core_plus_addendum": {"mean": add_mean, "scores": add_scores},
+        "delta": delta,
+        "per_scenario_pass_rate": {
+            sc["id"]: {"core": round(core_passes[sc["id"]] / args.runs, 2),
+                       "addendum": round(add_passes[sc["id"]] / args.runs, 2)}
+            for sc in SCENARIOS
+        },
+    }
 
     if args.json:
-        print(json.dumps(out, indent=2)); return
+        print(json.dumps(out, indent=2))
+        return
 
-    print(f"\n=== Real-task benchmark (model={args.model}) ===")
-    print(f"  core-only:       {r_core['pass']}/{r_core['total']}  ({r_core['score']:.2f})")
-    print(f"  core+addendum:   {r_add['pass']}/{r_add['total']}  ({r_add['score']:.2f})")
-    print(f"  DELTA:           {out['delta']:+.2f}\n")
-    by = {r['id']: r for r in r_core['results']}
-    for r in r_add['results']:
-        c = by[r['id']]
-        print(f"    {r['id']:32} {c['pass']!s:5} -> {r['pass']!s:5}  [{'PASS' if r['pass'] else 'FAIL'}]")
+    print(f"\n=== Real-task benchmark (model={args.model}, {args.runs} runs avg) ===")
+    print(f"  core-only:       {core_mean:.3f}  (runs: {core_scores})")
+    print(f"  core+addendum:   {add_mean:.3f}  (runs: {add_scores})")
+    print(f"  DELTA (mean):    {delta:+.3f}\n")
+    print(f"  per-scenario pass-rate (core -> addendum), /{args.runs} runs:")
+    for sc in SCENARIOS:
+        iid = sc["id"]
+        c = out["per_scenario_pass_rate"][iid]
+        bar = "PASS" if c["addendum"] > c["core"] else ("REGRESS" if c["addendum"] < c["core"] else "same")
+        print(f"    {iid:32} {c['core']:.2f} -> {c['addendum']:.2f}  [{bar}]")
 
 
 if __name__ == "__main__":
