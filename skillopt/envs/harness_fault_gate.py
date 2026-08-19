@@ -50,7 +50,11 @@ from skillopt.envs.scoring import score_response  # noqa: E402
 # ── Thresholds (tunable) ────────────────────────────────────────────────────
 EMPTY_RESPONSE_FRACTION = 0.25   # >25% of a batch empty/ERROR => harness fault
 OPTIMIZER_NOOP_STREAK = 3        # >=3 consecutive no-patch/all-reject steps
+OPTIMIZER_NOOP_ABORT = 5         # >=5 consecutive => abort the run mid-flight
 FALSE_VETO_MIN_LEN = 3           # must_not patterns shorter than this are suspect
+
+# Step actions that mean "the optimizer changed nothing this step".
+NOOP_ACTIONS = ("skip_no_patches", "reject")
 
 
 # ── Preflight: dataset discrimination ───────────────────────────────────────
@@ -210,6 +214,35 @@ def postflight_empty_responses(telemetry: list[dict]) -> dict:
             "fraction": frac, "findings": findings}
 
 
+def optimizer_noop_streak(actions) -> int:
+    """Length of the TRAILING consecutive no-op/reject run in a step-action stream.
+
+    Pure helper shared by the mid-run early-stop (trainer) and postflight.
+    Any non-noop action (accept / accept_new_best / force_accept / skip_no_rewrite)
+    resets the streak to 0.
+    """
+    streak = 0
+    for action in actions:
+        streak = streak + 1 if action in NOOP_ACTIONS else 0
+    return streak
+
+
+def optimizer_noop_abort_step(actions, threshold: int = OPTIMIZER_NOOP_ABORT):
+    """1-indexed position in *actions* where the noop streak first hits *threshold*.
+
+    Returns None if the stream never stalls that long — i.e. the step number at
+    which an early-stop would fire, so the gate is testable without a trainer.
+    """
+    if threshold <= 0:
+        return None
+    streak = 0
+    for i, action in enumerate(actions, start=1):
+        streak = streak + 1 if action in NOOP_ACTIONS else 0
+        if streak >= threshold:
+            return i
+    return None
+
+
 def postflight_optimizer_noop(history: list[dict]) -> dict:
     """Flag consecutive no-patch / all-reject steps (optimizer stalling)."""
     if not history:
@@ -218,7 +251,7 @@ def postflight_optimizer_noop(history: list[dict]) -> dict:
     max_streak = 0
     for s in history:
         action = s.get("action")
-        if action in ("skip_no_patches", "reject"):
+        if action in NOOP_ACTIONS:
             streak += 1
             max_streak = max(max_streak, streak)
         else:

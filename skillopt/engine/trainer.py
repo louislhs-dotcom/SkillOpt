@@ -25,6 +25,8 @@ from collections import defaultdict
 from skillopt.datasets.base import BatchSpec
 from skillopt.envs.base import EnvAdapter
 from skillopt.envs.harness_fault_gate import (
+    OPTIMIZER_NOOP_ABORT,
+    optimizer_noop_streak,
     preflight_discrimination,
     preflight_config,
     postflight,
@@ -1198,6 +1200,15 @@ class ReflACTTrainer:
         if resume_from > total_steps:
             print(f"\n  [skip] all {total_steps} steps complete — jumping to evaluation")
 
+        # Early-stop threshold for the optimizer-stall gate (0 = disabled).
+        _hg = cfg.get("harness_gate", {})
+        noop_abort_threshold = (
+            int(_hg.get("optimizer_noop_abort_threshold", OPTIMIZER_NOOP_ABORT))
+            if _hg.get("enabled", True)
+            and _hg.get("early_stop_optimizer_noop", True)
+            else 0
+        )
+
         global_step = 0
         for epoch in range(1, num_epochs + 1):
             if dataloader is not None:
@@ -1239,6 +1250,29 @@ class ReflACTTrainer:
                 global_step += 1
                 if global_step < resume_from:
                     continue
+
+                # ── Optimizer-stall EARLY-STOP ───────────────────────────
+                # Checked at the top of the step from the actions already
+                # recorded, so a stalled optimizer aborts BEFORE burning
+                # another rollout instead of grinding to the last step
+                # (postflight only flags the same streak after the run ends).
+                # `history` is the in-memory list — history.json is not re-read.
+                if noop_abort_threshold > 0:
+                    noop_streak = optimizer_noop_streak(
+                        h.get("action") for h in history
+                    )
+                    if noop_streak >= noop_abort_threshold:
+                        raise SystemExit(
+                            f"OPTIMIZER STALLED — {noop_streak} consecutive "
+                            f"no-patch/reject steps >= threshold "
+                            f"{noop_abort_threshold} (aborting at step "
+                            f"{global_step}/{total_steps}; best={best_score:.4f} "
+                            f"from step {best_step}). The optimizer is producing "
+                            f"nothing usable; continuing only burns tokens. "
+                            f"(set harness_gate.early_stop_optimizer_noop=false "
+                            f"or raise harness_gate.optimizer_noop_abort_threshold "
+                            f"to override)"
+                        )
 
                 step_t0 = time.time()
                 step_dir = os.path.join(out_root, "steps", f"step_{global_step:04d}")

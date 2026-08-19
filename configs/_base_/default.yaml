@@ -107,10 +107,16 @@ evaluation:
 # optimizer-noop streaks) after the loop. A preflight FAIL aborts the run so
 # a broken dataset/config never wastes a training run. Postflight FAIL is
 # reported but does not abort (the run already finished).
+# An EARLY-STOP also runs inside the loop: when the optimizer produces
+# `optimizer_noop_abort_threshold` consecutive no-patch/reject steps the run
+# aborts instead of grinding to the last step (a 15-step stall cost ~2.7M
+# tokens before postflight flagged it, after the fact).
 harness_gate:
   enabled: true
   preflight_abort_on_fail: true
   postflight_report_only: true
+  early_stop_optimizer_noop: true
+  optimizer_noop_abort_threshold: 5
 
 env:
   name: ""
