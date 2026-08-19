@@ -9,7 +9,9 @@ env:
   # the core prompt. core_baseline.md is immutable; the optimizer tunes only
   # this small note (see adapter.rollout).
   skill_init: skillopt/envs/hermes_prompt/skills/addendum_init.md
-  split_dir: data/hermes-prompt
+  # LEAN behavioral-only dataset (42 items, 25/8/9) — excludes 63 low-leverage
+  # "normal" factual Q&A items that were saturated and wasted optimizer tokens.
+  split_dir: data/hermes-prompt-lean
   split_mode: split_dir
   split_ratio: "6:2:2"
   split_output_dir: ''
@@ -17,8 +19,8 @@ env:
 evaluation:
   eval_test: false
   gate_metric: soft
-  sel_env_num: 21
-  test_env_num: 21
+  sel_env_num: 8
+  test_env_num: 9
   use_gate: true
 gradient:
   analyst_workers: 4
@@ -62,4 +64,4 @@ train:
   batch_size: 4
   num_epochs: 2
   seed: 42
-  train_size: 63
+  train_size: 25

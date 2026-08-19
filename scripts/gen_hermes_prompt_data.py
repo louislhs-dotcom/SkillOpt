@@ -400,9 +400,36 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="data/hermes-prompt")
     ap.add_argument("--seed", type=int, default=42)
+    # Exclude low-leverage "normal" factual Q&A items from the train split.
+    # Those test rote knowledge (saturated, all skips) and waste optimizer
+    # tokens. Keep only BEHAVIORAL items that test guidance the addendum can
+    # actually improve.
+    ap.add_argument("--behavioral-only", action="store_true",
+                    help="Exclude 'normal' factual items from training; keep only behavioral task types")
     args = ap.parse_args()
 
     items = build_items()
+
+    # ── Behavioral-only filtering ───────────────────────────────────────────
+    # "normal" items are rote factual Q&A (What is a hash map? Explain git
+    # rebase?) — saturated and low-leverage. The high-value items are the
+    # BEHAVIORAL task types that test guidance the optimized addendum can
+    # improve: native-env, error-correction, concise, right-sizing,
+    # no-re-approval, order, verify-before-claim, safety-carveout, tool-names,
+    # over-engineering, no-skill-bloat, tool-usage, finish-the-job,
+    # memory-vs-skill.
+    BEHAVIORAL_TYPES = {
+        "native-env", "error-correction", "concise", "right-sizing",
+        "right-sizing-boundary", "no-re-approval", "order", "verify-before-claim",
+        "safety-carveout", "tool-names", "over-engineering", "no-skill-bloat",
+        "tool-usage", "finish-the-job", "memory-vs-skill",
+    }
+    if args.behavioral_only:
+        kept = [i for i in items if i["task_type"] in BEHAVIORAL_TYPES]
+        dropped = len(items) - len(kept)
+        items = kept
+        print(f"[behavioral-only] dropped {dropped} low-leverage items; kept {len(items)}")
+
     print(f"Total items: {len(items)}")
 
     # Deterministic split: 6:2:2
