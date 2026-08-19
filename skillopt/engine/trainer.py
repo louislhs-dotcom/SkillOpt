@@ -602,6 +602,65 @@ def _extract_failure_patterns(
     return patterns
 
 
+def _format_failure_digest(
+    failure_patterns: list[dict],
+    max_patterns: int = 3,
+    max_ids: int = 3,
+    max_desc: int = 60,
+) -> str:
+    """Render failure patterns as a compact one-line digest.
+
+    Returns ``""`` when there is nothing to report.
+    """
+    if not failure_patterns:
+        return ""
+    ranked = sorted(
+        failure_patterns,
+        key=lambda p: int(p.get("count", 0) or 0),
+        reverse=True,
+    )[:max_patterns]
+    parts = []
+    for pat in ranked:
+        desc = " ".join(str(pat.get("pattern", "unknown")).split())
+        if len(desc) > max_desc:
+            desc = desc[: max_desc - 1] + "\u2026"
+        ids = [str(i) for i in (pat.get("task_ids") or [])][:max_ids]
+        id_str = f" [{','.join(ids)}]" if ids else ""
+        parts.append(f"{desc} x{int(pat.get('count', 0) or 0)}{id_str}")
+    extra = len(failure_patterns) - len(ranked)
+    if extra > 0:
+        parts.append(f"+{extra} more")
+    return "; ".join(parts)
+
+
+def _build_reject_reason(
+    kind: str,
+    detail: str,
+    n_fail: int,
+    n_total: int,
+    failure_patterns: list[dict] | None = None,
+    gate_metric: str | None = None,
+) -> str:
+    """Build the diagnostic ``reject_reason`` string for a rejected step.
+
+    Always returns a non-empty string so downstream consumers (fault gate,
+    log pool) can rely on ``reject_reason`` being set on every reject.
+
+    Example::
+
+        below_baseline: mixed 0.3500 <= current 0.4000 (gap=-0.0500)
+        | metric=mixed | fails=3/10 | patterns: missing_citation x2 [t1,t3]
+    """
+    fields = [f"{kind or 'reject'}: {detail}" if detail else (kind or "reject")]
+    if gate_metric:
+        fields.append(f"metric={gate_metric}")
+    fields.append(f"fails={n_fail}/{n_total}")
+    digest = _format_failure_digest(failure_patterns or [])
+    if digest:
+        fields.append(f"patterns: {digest}")
+    return " | ".join(fields)
+
+
 def _format_step_buffer(buffer: list[dict]) -> str:
     """Format the unified step buffer into a single context block.
 
@@ -1584,8 +1643,20 @@ class ReflACTTrainer:
                 # gate; only shrinking edits were accepted. This saves the wasted
                 # selection evaluation and prevents verbosity from ever landing.
                 if cfg.get("veto_growing_candidates") and len(candidate_skill) > len(current_skill):
+                    veto_n_total = len(all_rollout_results) or 1
+                    veto_n_fail = sum(
+                        1 for r in all_rollout_results
+                        if not r.get("hard") or float(r.get("hard", 0)) < 1e-9
+                    )
                     step_rec["action"] = "reject"
-                    step_rec["reject_reason"] = "veto_growing_candidate"
+                    step_rec["reject_reason"] = _build_reject_reason(
+                        "veto_growing_candidate",
+                        f"skill grew {len(current_skill)} -> {len(candidate_skill)} chars "
+                        f"(+{len(candidate_skill) - len(current_skill)})",
+                        veto_n_fail,
+                        veto_n_total,
+                        _extract_failure_patterns(all_rollout_results, step_dir),
+                    )
                     step_rec["current_score"] = current_score
                     step_rec["best_score"] = best_score
                     step_rec["best_step"] = best_step
@@ -1788,6 +1859,21 @@ class ReflACTTrainer:
                     "n_fail": n_fail,
                     "failure_patterns": failure_patterns,
                 }
+
+                # Full reject telemetry: the gate-reject path (score <= baseline)
+                # must carry the same diagnosability as the veto path, so every
+                # reject has a non-null, human-readable reject_reason.
+                if gate.action == "reject" and not step_rec.get("reject_reason"):
+                    step_rec["reject_reason"] = _build_reject_reason(
+                        "below_baseline",
+                        f"{gate_metric} {cand_gate_score:.4f} <= current "
+                        f"{current_score:.4f} "
+                        f"(gap={cand_gate_score - current_score:+.4f})",
+                        n_fail,
+                        n_total,
+                        failure_patterns,
+                        gate_metric=gate_metric,
+                    )
 
                 # Attach rejected edits when the step was rejected
                 if "reject" in action and ranked_patch:
