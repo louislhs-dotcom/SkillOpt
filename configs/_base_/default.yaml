@@ -101,6 +101,17 @@ evaluation:
   test_env_num: 0
   eval_test: true
 
+# Automated harness-fault gate (skillopt/envs/harness_fault_gate.py).
+# When enabled, the trainer runs PREFLIGHT (dataset discrimination + config
+# match) before the baseline eval and POSTFLIGHT (empty-response spikes,
+# optimizer-noop streaks) after the loop. A preflight FAIL aborts the run so
+# a broken dataset/config never wastes a training run. Postflight FAIL is
+# reported but does not abort (the run already finished).
+harness_gate:
+  enabled: true
+  preflight_abort_on_fail: true
+  postflight_report_only: true
+
 env:
   name: ""
   skill_init: ""

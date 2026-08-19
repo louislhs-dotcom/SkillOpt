@@ -24,6 +24,11 @@ from collections import defaultdict
 
 from skillopt.datasets.base import BatchSpec
 from skillopt.envs.base import EnvAdapter
+from skillopt.envs.harness_fault_gate import (
+    preflight_discrimination,
+    preflight_config,
+    postflight,
+)
 from skillopt.evaluation.gate import GateResult, evaluate_gate, select_gate_score
 from skillopt.gradient.aggregate import merge_patches
 from skillopt.optimizer.meta_skill import run_meta_skill
@@ -1116,6 +1121,46 @@ class ReflACTTrainer:
                else "force-accept (unconditional)")
         )
         if current_score < 0:
+            # ── Harness-fault PREFLIGHT ──────────────────────────────────
+            # Run before the baseline eval so a broken dataset/config never
+            # wastes a training run. Discrimination + config match must pass;
+            # a FAIL aborts (unless preflight_abort_on_fail is false).
+            hg = cfg.get("harness_gate", {})
+            if hg.get("enabled", True):
+                print(f"\n{'='*60}")
+                print("  HARNESS-FAULT PREFLIGHT")
+                print(f"{'='*60}")
+                try:
+                    items = {
+                        "train": dataloader.train_items or [],
+                        "val": dataloader.val_items or [],
+                        "test": dataloader.test_items or [],
+                    }
+                    disc = preflight_discrimination(
+                        items["train"] + items["val"] + items["test"]
+                    )
+                    cfgchk = preflight_config(items, cfg)
+                    print(
+                        f"  discrimination: {disc['total']} items, "
+                        f"{disc['failed']} failed"
+                    )
+                    for f in disc["findings"]:
+                        print(f"    [FAIL] {f['id']}: {'; '.join(f['problems'])}")
+                    print(f"  config match: {'PASS' if cfgchk['ok'] else 'FAIL'}")
+                    for prob in cfgchk["problems"]:
+                        print(f"    [FAIL] {prob}")
+                    pre_ok = disc["ok"] and cfgchk["ok"]
+                    print("  PREFLIGHT:", "PASS" if pre_ok else "FAIL")
+                    if not pre_ok and hg.get("preflight_abort_on_fail", True):
+                        raise SystemExit(
+                            "PREFLIGHT FAILED — broken dataset/config. "
+                            "Fix before running. (set harness_gate.preflight_abort_on_fail=false to override)"
+                        )
+                except SystemExit:
+                    raise
+                except Exception as e:
+                    print(f"  [WARN] preflight errored (continuing): {e}")
+
             print(f"\n{'='*60}")
             print("  BASELINE — evaluate initial skill on Selection set (valid_seen)")
             print(f"{'='*60}")
@@ -2508,6 +2553,34 @@ class ReflACTTrainer:
         }
         with open(os.path.join(out_root, "summary.json"), "w") as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
+
+        # ── Harness-fault POSTFLIGHT ─────────────────────────────────────
+        # Run after the loop: flag empty-response spikes and optimizer-noop
+        # streaks. Report-only (the run already finished) unless configured
+        # otherwise.
+        hg = cfg.get("harness_gate", {})
+        if hg.get("enabled", True):
+            print(f"\n{'='*60}")
+            print("  HARNESS-FAULT POSTFLIGHT")
+            print(f"{'='*60}")
+            try:
+                res = postflight(out_root)
+                for name, c in res["checks"].items():
+                    status = "PASS" if c["ok"] else "FAIL"
+                    print(f"  {name}: {status}")
+                    for f in c["findings"]:
+                        print(f"    [FAIL] {f}")
+                print("  POSTFLIGHT:", "PASS" if res["ok"] else "FAIL")
+                summary["harness_postflight_ok"] = res["ok"]
+                if not res["ok"] and not hg.get("postflight_report_only", True):
+                    raise SystemExit(
+                        "POSTFLIGHT FAILED — harness fault detected. "
+                        "Inspect the run before trusting its results."
+                    )
+            except SystemExit:
+                raise
+            except Exception as e:
+                print(f"  [WARN] postflight errored: {e}")
 
         print(f"\n{'='*60}")
         print("  Final Summary")
