@@ -11,7 +11,7 @@ import subprocess
 import urllib.request
 from skillopt.datasets.base import BatchSpec
 from skillopt.envs.base import EnvAdapter
-from skillopt.envs.webintel.dataloader import WebIntelDataLoader
+from skillopt.envs.webintel.dataloader import WebIntelDataLoader, merge_skill
 from skillopt.envs.webintel.rubric_scoring import score_with_rubric, WEBINTEL_FULL_RUBRIC
 from skillopt.envs.webintel.dsh_judge import dsh_score_response, dsh_available
 from skillopt.envs.webintel.nvidia_judge import nvidia_score_response, nvidia_available
@@ -121,9 +121,18 @@ class WebIntelAdapter(EnvAdapter):
         batch = self.dataloader.build_eval_batch(env_num=env_num, split=split, seed=seed, **kwargs)
         return self.build_env_from_batch(batch, **kwargs)
 
-    def get_merged_skill(self) -> str:
-        """Get the combined template + site config skill."""
-        return self.dataloader.get_merged_skill()
+    def get_merged_skill(self, skill_content: str = "") -> str:
+        """Merge the skill being optimized with the site-specific config.
+
+        `skill_content` is the thing the optimizer edits, so it is the BASE of
+        the system prompt; the site config is appended to it. Only when no
+        skill content is supplied do we fall back to the dataloader's fixed
+        template + site config merge.
+        """
+        skill = (skill_content or "").strip()
+        if not skill:
+            return self.dataloader.get_merged_skill()
+        return merge_skill(skill, self.dataloader.get_site_config())
 
     def _get_tdai_context(self):
         if self._tdai_cache is None:
@@ -135,7 +144,8 @@ class WebIntelAdapter(EnvAdapter):
     def rollout(self, env_manager, skill_content, out_dir, **kwargs):
         """Roll out the skill on WebIntel tasks.
 
-        Uses the merged skill (template + site config) from the dataloader.
+        The system prompt is the optimized `skill_content` with the site
+        config appended, so optimizer edits reach the target model.
         """
         from skillopt.model import chat_target
         items = env_manager
@@ -144,8 +154,8 @@ class WebIntelAdapter(EnvAdapter):
 
         tdai_ctx = self._get_tdai_context()
 
-        # Get merged skill (template + site config) for system prompt
-        merged_skill = self.get_merged_skill() or skill_content
+        # Optimized skill_content is the base; site config is appended.
+        merged_skill = self.get_merged_skill(skill_content)
 
         # Extract site info from merged skill for context
         site_context = ""

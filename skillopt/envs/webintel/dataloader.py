@@ -46,6 +46,7 @@ class WebIntelDataLoader(SplitDataLoader):
         self.skill_template_path = skill_template_path
         self.site_config_path = site_config_path
         self._merged_skill = None
+        self._site_config = None
         super().__init__(
             split_dir=split_dir, data_path=data_path, split_mode=split_mode,
             split_ratio=split_ratio, split_seed=split_seed,
@@ -62,11 +63,16 @@ class WebIntelDataLoader(SplitDataLoader):
         else:
             template = ""
         site_config = load_site_config(site_config_path) if site_config_path else None
+        self._site_config = site_config
         self._merged_skill = merge_skill(template, site_config)
 
     def get_merged_skill(self) -> str:
         """Return the combined template + site config skill."""
         return self._merged_skill or ""
+
+    def get_site_config(self) -> str:
+        """Return the site-specific configuration alone (no template)."""
+        return self._site_config or ""
 
     def load_split_items(self, split_path: str) -> list[dict]:
         path = Path(split_path)
