@@ -295,11 +295,17 @@ def _lemmatize(word: str) -> str:
     return word
 
 
-def _token_find(pattern: str, text: str) -> int | None:
+def _token_find(pattern: str, text: str, strict: bool = False) -> int | None:
     """Return the start index of the first whole-token match, or None.
 
     Matches the pattern OR its synonyms/lemmas in the text. Uses word
     boundaries so ``POST`` does not match ``postpone``.
+
+    ``strict=True`` is for FORBIDDEN (must_not) patterns: it matches only the
+    exact pattern plus its MULTI-WORD synonyms. Bare single-word synonyms are
+    skipped because they are too generic to justify a hard veto — e.g. the
+    must_not "it works" must not veto a correct answer that says "working
+    alternative", and "click it" must not veto "don't click".
     """
     p = _normalize(pattern)
     t = _normalize(text)
@@ -316,6 +322,9 @@ def _token_find(pattern: str, text: str) -> int | None:
     for syn in _SYNONYMS.get(p, []):
         syn_n = _normalize(syn)
         if not syn_n:
+            continue
+        # In strict mode, a bare single-word synonym is never enough to veto.
+        if strict and " " not in syn_n:
             continue
         s_esc = re.escape(syn_n)
         s_pre = r"\b" if syn_n[:1].isalnum() else ""
@@ -340,14 +349,16 @@ def _token_find(pattern: str, text: str) -> int | None:
     return None
 
 
-def _token_match(pattern: str, text: str) -> bool:
+def _token_match(pattern: str, text: str, strict: bool = False) -> bool:
     """Match ``pattern`` as a whole token/phrase in ``text``.
 
     Uses word boundaries so ``POST`` does not match ``postpone`` and ``GET``
     does not match ``target``. Multi-word patterns match as a phrase.
-    Both pattern and text are normalized internally.
+    Both pattern and text are normalized internally. ``strict=True`` (used for
+    must_not) skips bare single-word synonyms so a veto requires the actual
+    forbidden phrase or a multi-word equivalent.
     """
-    return _token_find(pattern, text) is not None
+    return _token_find(pattern, text, strict=strict) is not None
 
 
 def _spec_matches(spec: dict, text_norm: str) -> bool:
@@ -472,9 +483,11 @@ def score_response(
 
     matched = [s["pattern"] for s in required if _spec_matches(s, norm)]
     missed = [s["pattern"] for s in required if not _spec_matches(s, norm)]
-    # Forbidden patterns stay STRICT: matched by exact pattern only, never the
-    # accept list — so accept lists cannot soften a hard veto.
-    violations = [s["pattern"] for s in forbidden if _token_match(s["pattern"], norm)]
+    # Forbidden patterns stay STRICT: matched by exact pattern or multi-word
+    # synonym only (never bare single-word synonyms), so a correct answer using
+    # a word incidentally (e.g. "working alternative" vs must_not "it works")
+    # is not falsely hard-vetoed.
+    violations = [s["pattern"] for s in forbidden if _token_match(s["pattern"], norm, strict=True)]
 
     total_weight = sum(s["weight"] for s in required)
     matched_weight = sum(

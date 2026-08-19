@@ -133,6 +133,49 @@ class TestISavedRegression:
         assert "it's saved" in sc["violations"]
 
 
+class TestMustNotStrictSingleWord:
+    """Strict must_not: a bare single-word synonym must never false-veto a
+    correct answer that uses the word incidentally (e.g. "working alternative"
+    vs must_not "it works", "don't click" vs must_not "click it")."""
+
+    def test_working_alternative_does_not_veto_it_works(self) -> None:
+        sc = score_response(
+            "give them a working alternative to the broken link",
+            check=[{"pattern": "broken", "weight": 1.0}],
+            must_not=[{"pattern": "it works", "weight": 3.0}],
+        )
+        assert sc["hard"] == 1.0
+        assert "it works" not in sc["violations"]
+
+    def test_dont_click_does_not_veto_click_it(self) -> None:
+        # "don't click" (single word "click") must not veto must_not "click it"
+        sc = score_response(
+            "the link is broken; warn them and tell them not to click",
+            check=[{"pattern": "broken", "weight": 1.0}],
+            must_not=[{"pattern": "click it", "weight": 2.0}],
+        )
+        assert sc["hard"] == 1.0
+        assert "click it" not in sc["violations"]
+
+    def test_actual_phrase_still_vetoes(self) -> None:
+        sc = score_response(
+            "just click it and see what happens",
+            check=[{"pattern": "broken", "weight": 1.0}],
+            must_not=[{"pattern": "click it", "weight": 2.0}],
+        )
+        assert sc["hard"] == 0.0
+        assert "click it" in sc["violations"]
+
+    def test_multi_word_synonym_still_vetoes(self) -> None:
+        # "it works fine" is a multi-word synonym of must_not "it works"
+        sc = score_response(
+            "the link it works fine now, no issue",
+            check=[{"pattern": "broken", "weight": 1.0}],
+            must_not=[{"pattern": "it works", "weight": 3.0}],
+        )
+        assert sc["hard"] == 0.0
+
+
 if __name__ == "__main__":
     import sys
 
