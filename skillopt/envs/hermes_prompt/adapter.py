@@ -78,6 +78,12 @@ def tdai_write_memory(content):
 
 
 class HermesPromptAdapter(EnvAdapter):
+    # The IMMUTABLE core prompt. Per the Prime/DSH study (see dsh_prime_transfer_pilot),
+    # the base system prompt must NOT be edited by the optimizer — behavior improves by
+    # tuning a small ADDENDUM (prompt-note) layered on top. `skill_content` is the
+    # addendum; `core_baseline.md` is fixed.
+    CORE_PROMPT_PATH = os.path.join(os.path.dirname(__file__), "skills", "core_baseline.md")
+
     def __init__(self, split_dir="", data_path="", split_mode="split_dir",
                  split_ratio="2:1:7", split_seed=42, split_output_dir="",
                  workers=4, analyst_workers=4, failure_only=False,
@@ -133,14 +139,32 @@ class HermesPromptAdapter(EnvAdapter):
         if tdai_ctx:
             print(f"  [TDAI] Loaded {len(tdai_ctx)} chars of shared memory context")
 
+        # ── Prime architecture: immutable core + optimized addendum ─────────
+        # The base system prompt (core_baseline.md) is FIXED and never edited.
+        # `skill_content` is the small prompt-note/addendum the optimizer tunes.
+        # This is the Prime `/refine` pattern: improve behavior via the addendum
+        # layer, not by mutating the immutable core (which the conciseness test
+        # correctly rejects). The core is loaded once; the addendum is appended.
+        try:
+            with open(self.CORE_PROMPT_PATH, encoding="utf-8") as _f:
+                core_prompt = _f.read().strip()
+        except Exception:
+            core_prompt = ""
+        addendum = (skill_content or "").strip()
+
         system_msg = (
-            "You are a Hermes Agent operating under the stable-tier guidance below. "
-            "Apply the guidance strictly, then answer the user's request. "
-            "Do not include meta-commentary about the guidance itself.\n\n"
-            "--- HERMES STABLE-TIER GUIDANCE (skill) ---\n"
-            f"{skill_content}\n"
-            "--- END GUIDANCE ---"
+            "You are a Hermes Agent. Apply the guidance below, then answer the "
+            "user's request. Do not include meta-commentary about the guidance.\n\n"
+            "--- CORE GUIDANCE (fixed, always applies) ---\n"
+            f"{core_prompt}\n"
+            "--- END CORE ---"
         )
+        if addendum:
+            system_msg += (
+                "\n\n--- ADDITIONAL GUIDANCE (prompt note) ---\n"
+                f"{addendum}\n"
+                "--- END ADDITIONAL ---"
+            )
         if tdai_ctx:
             system_msg += f"\n\n{tdai_ctx}"
 

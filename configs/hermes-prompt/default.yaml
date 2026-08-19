@@ -5,7 +5,10 @@ env:
   max_completion_tokens: 1024
   max_turns: 1
   name: hermes-prompt
-  skill_init: skillopt/envs/hermes_prompt/skills/initial.md
+  # PRIME ARCHITECTURE: the editable skill is the ADDENDUM (prompt-note), not
+  # the core prompt. core_baseline.md is immutable; the optimizer tunes only
+  # this small note (see adapter.rollout).
+  skill_init: skillopt/envs/hermes_prompt/skills/addendum_init.md
   split_dir: data/hermes-prompt
   split_mode: split_dir
   split_ratio: "6:2:2"

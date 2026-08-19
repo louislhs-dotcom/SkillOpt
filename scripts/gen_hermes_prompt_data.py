@@ -330,6 +330,33 @@ def build_items() -> list[dict]:
     for iid, tt, q, chk, mn in h_defs:
         items.append(item(iid, tt, q, chk, must_not=mn))
 
+    # ── J. Native environment (Prime transfer, dsh_prime_transfer_pilot) ────
+    # Prime's principle: use the project's OWN environment, not the agent's
+    # global interpreter. The addendum (prompt-note) layer is what the optimizer
+    # tunes to improve these — the core prompt is immutable.
+    native_env_items = [
+        ("ne_001", "native-env",
+         "The project's tests are failing with an import error even though the dependency is installed in the project venv. What's the first thing to check?",
+         [{"pattern": "project", "weight": 1.0, "accept": ["project venv", "repo", "venv", "own environment"]},
+          {"pattern": "global", "weight": 1.0, "accept": ["global pythonpath", "agent venv", "wrong version", "shadow"]},
+          {"pattern": "unset", "weight": 1.0, "accept": ["env -u", "use the project venv", "project venv python"]}],
+         [{"pattern": "install", "weight": 2.0, "accept": ["pip install", "reinstall"]},
+          {"pattern": "ignore", "weight": 1.5}]),
+        ("ne_002", "native-env",
+         "You need to run a Python script in a repo. The repo has a .venv with the dependencies. How do you run it?",
+         [{"pattern": "venv", "weight": 2.0, "accept": [".venv/bin/python", "project environment"]},
+          {"pattern": "global", "weight": 1.0, "accept": ["global python", "system python"]}],
+         [{"pattern": "install", "weight": 2.0, "accept": ["pip install"]}]),
+        ("ne_003", "native-env",
+         "A script imports a library and you suspect it's resolving to the wrong version because of a pre-set PYTHONPATH. What do you do?",
+         [{"pattern": "unset", "weight": 1.5, "accept": ["env -u pythonpath", "unset pythonpath"]},
+          {"pattern": "project", "weight": 1.0, "accept": ["project venv", "venv"]}],
+         [{"pattern": "install", "weight": 2.0, "accept": ["pip install", "reinstall"]},
+          {"pattern": "ignore", "weight": 1.5}]),
+    ]
+    for iid, tt, q, chk, mn in native_env_items:
+        items.append(item(iid, tt, q, chk, must_not=mn))
+
     # ── I. Error correction / mistake detection (test whether the prompt
     #       makes the model catch and fix its own errors) ───────────────────
     # These items present a scenario where the model made a mistake (or a
