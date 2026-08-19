@@ -73,6 +73,48 @@ def generate_mock_items() -> List[Dict]:
     ]
 
 
+# Deterministic ego-lite cleanup items: the agent must close its browser tabs
+# (completeTaskSpace / closeTab) when the task finishes, or RAM creeps across
+# many webintel tasks. These are ALWAYS added regardless of TDAI query results.
+# The must_not "leave the tab open" / "keep it open" catches the RAM-leak habit.
+EGO_LITE_CLEANUP_ITEMS = [
+    {
+        "id": "egolite_cleanup_001",
+        "question": (
+            "You finished scraping Carousell with ego-browser. The task is done "
+            "and the user has the data. What is the last step?"
+        ),
+        "check": [
+            {"pattern": "close", "accept": ["closed", "closing", "completeTaskSpace"]},
+            {"pattern": "tab", "accept": ["task space", "taskspace"]},
+        ],
+        "must_not": [
+            "leave it open", "keep the tab open", "keep it open",
+            "stay open", "no need to close the tab", "handles it automatically",
+        ],
+        "task_type": "webintel",
+        "site": "carousell",
+    },
+    {
+        "id": "egolite_cleanup_003",
+        "question": (
+            "After completing a webintel task with ego-browser, what should you "
+            "call to prevent RAM creep from open task spaces?"
+        ),
+        "check": [
+            {"pattern": "completeTaskSpace", "accept": ["complete task space", "completetaskspace"]},
+            {"pattern": "task space", "accept": ["taskspace", "tab", "completeTaskSpace"]},
+        ],
+        "must_not": [
+            "keep the space", "leave it open", "keep it open",
+            "stay open", "no need to call", "automatically",
+        ],
+        "task_type": "webintel",
+        "site": "empty",
+    },
+]
+
+
 # Load API key
 def load_api_key() -> str:
     with open(API_KEY_PATH, "r") as f:
@@ -195,6 +237,11 @@ def main():
     if not all_items:
         print("No items found in TDAI gateway. Using mock data.")
         all_items = generate_mock_items()
+
+    # ALWAYS include the ego-lite cleanup items (RAM-creep prevention). These
+    # are deterministic and independent of TDAI query results, so the test
+    # suite always exercises tab-closing behavior.
+    all_items = EGO_LITE_CLEANUP_ITEMS + all_items
 
     # Split items into train/val/test (80/10/10)
     train_split = int(0.8 * len(all_items))

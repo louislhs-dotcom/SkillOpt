@@ -62,7 +62,7 @@ train:
   batch_size: 5
   num_epochs: 2
   seed: 42
-  train_size: 83
+  train_size: 85
 population:
   size: 4
   seeds:

@@ -70,4 +70,4 @@ train:
   batch_size: 5
   num_epochs: 3
   seed: 42
-  train_size: 83
+  train_size: 85
