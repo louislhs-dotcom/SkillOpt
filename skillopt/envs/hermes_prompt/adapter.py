@@ -329,6 +329,76 @@ class HermesPromptAdapter(EnvAdapter):
 
         return results
 
+    def reflect(self, results, skill_content, out_dir, **kwargs):
+        """Analyze rollout results and produce patches, ENFORCING no-growth.
+
+        The optimizer model (nemotron-3.5-lightning) ignores the brevity
+        constraint in the analyst prompt and emits `append`/`insert_after`
+        ops that grow the skill — 5 of 14 steps in the v8 run were wasted
+        on growing candidates that the veto then rejected. Prompt-level
+        constraint is insufficient; enforce it at the code level here.
+
+        Any edit that would grow the skill (append/insert_after, or a
+        replace that lengthens its target) is dropped. If no compliant
+        edits remain, the patch is dropped entirely (skill unchanged).
+        """
+        from skillopt.gradient.reflect import run_minibatch_reflect
+
+        raw = run_minibatch_reflect(
+            results=results,
+            skill_content=skill_content,
+            prediction_dir=kwargs.get(
+                "prediction_dir", os.path.join(out_dir, "predictions")
+            ),
+            patches_dir=kwargs.get(
+                "patches_dir", os.path.join(out_dir, "patches")
+            ),
+            workers=self.analyst_workers,
+            failure_only=self.failure_only,
+            minibatch_size=self.minibatch_size,
+            edit_budget=self.edit_budget,
+            random_seed=kwargs.get("random_seed"),
+            error_system=self.get_error_minibatch_prompt(),
+            success_system=self.get_success_minibatch_prompt(),
+            step_buffer_context=kwargs.get("step_buffer_context", ""),
+            meta_skill_context=kwargs.get("meta_skill_context", ""),
+            update_mode=getattr(self, "_cfg", {}).get("skill_update_mode", "patch"),
+        )
+
+        # ── Code-level no-growth enforcement ─────────────────────────────
+        # The skill is a system prompt scored on CONCISENESS. Growth is
+        # always rejected by the gate (100+ steps of evidence). Filter out
+        # any edit that grows the skill so the optimizer can't waste steps.
+        filtered = []
+        for p in raw:
+            if not isinstance(p, dict):
+                continue
+            inner = p.get("patch", p)
+            if not isinstance(inner, dict):
+                continue
+            edits = inner.get("edits", [])
+            kept = []
+            for e in edits:
+                if not isinstance(e, dict):
+                    continue
+                op = e.get("op")
+                if op in ("append", "insert_after"):
+                    continue  # always grows — drop
+                if op == "replace":
+                    # A replace that lengthens its target grows the skill.
+                    target = e.get("target", "")
+                    content = e.get("content", "")
+                    if len(str(content)) > len(str(target)):
+                        continue
+                kept.append(e)
+            if not kept:
+                continue  # no compliant edits — drop the whole patch
+            inner = dict(inner)
+            inner["edits"] = kept
+            filtered.append({**p, "patch": inner})
+
+        return filtered
+
     def get_task_types(self) -> list[str]:
         items = self.dataloader.train_items or []
         return sorted(set(item.get("task_type", "default") for item in items))
