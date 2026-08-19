@@ -10,12 +10,15 @@ SkillOpt test:
    strict exact match).
 3. The ``_SYNONYMS`` over-match bug where the bare word "saved" (synonym of
    the must_not "it's saved") made the i1 item impossible to pass.
+4. Negation-aware ``must_not``: a forbidden phrase that only ever appears in
+   NEGATED form ("don't click it" vs must_not "click it") is not a violation,
+   while a single bare occurrence still vetoes.
 """
 from __future__ import annotations
 
 import pytest
 
-from skillopt.envs.scoring import score_response
+from skillopt.envs.scoring import _forbidden_match, score_response
 
 
 class TestAcceptListMatching:
@@ -174,6 +177,107 @@ class TestMustNotStrictSingleWord:
             must_not=[{"pattern": "it works", "weight": 3.0}],
         )
         assert sc["hard"] == 0.0
+
+
+class TestMustNotNegationAware:
+    """A forbidden phrase used only in NEGATED form is not a violation.
+
+    The harness fault gate found five real cases where the scorer hard-vetoed
+    a CORRECT answer that was telling the user *not* to do the forbidden thing.
+    """
+
+    def test_dont_click_it_does_not_veto(self) -> None:
+        sc = score_response(
+            "that link is broken — don't click it, I'll send the right one",
+            check=[{"pattern": "broken", "weight": 1.0}],
+            must_not=[{"pattern": "click it", "weight": 2.0}],
+        )
+        assert sc["hard"] == 1.0
+        assert sc["violations"] == []
+
+    def test_dont_reach_for_a_database_does_not_veto(self) -> None:
+        sc = score_response(
+            "keep it local-first — don't reach for a database for three rows",
+            check=[{"pattern": "local-first", "weight": 1.0}],
+            must_not=[{"pattern": "database", "weight": 2.0}],
+        )
+        assert sc["hard"] == 1.0
+        assert "database" not in sc["violations"]
+
+    def test_not_a_fancy_framework_does_not_veto(self) -> None:
+        sc = score_response(
+            "a single file by default — not a fancy framework",
+            check=[{"pattern": "single file", "weight": 1.0}],
+            must_not=[{"pattern": "framework", "weight": 3.0}],
+        )
+        assert sc["hard"] == 1.0
+        assert "framework" not in sc["violations"]
+
+    def test_shouldnt_have_said_it_passed_does_not_veto(self) -> None:
+        sc = score_response(
+            "i never ran the test — i shouldn't have said it passed",
+            check=[{"pattern": "test", "weight": 1.0}],
+            must_not=[{"pattern": "it passed", "weight": 2.0}],
+        )
+        assert sc["hard"] == 1.0
+        assert "it passed" not in sc["violations"]
+
+    def test_negated_multi_word_synonym_does_not_veto(self) -> None:
+        # must_not "would you like me to" fires via its multi-word synonym
+        # "want me to"; the negator here is "stop".
+        sc = score_response(
+            "the file is written. full stop — no \"let me know if you want me to\"",
+            check=[{"pattern": "written", "weight": 1.0}],
+            must_not=[{"pattern": "would you like me to", "weight": 2.0}],
+        )
+        assert sc["hard"] == 1.0
+        assert "would you like me to" not in sc["violations"]
+
+
+class TestMustNotGenuineViolationStillVetoes:
+    """Negation awareness must not open a hole: bare occurrences still veto."""
+
+    def test_bare_click_it_vetoes(self) -> None:
+        sc = score_response(
+            "just click it and see what happens",
+            check=[{"pattern": "broken", "weight": 1.0}],
+            must_not=[{"pattern": "click it", "weight": 2.0}],
+        )
+        assert sc["hard"] == 0.0
+        assert "click it" in sc["violations"]
+
+    def test_bare_framework_vetoes(self) -> None:
+        sc = score_response(
+            "use a framework for this simple task",
+            check=[{"pattern": "simple", "weight": 1.0}],
+            must_not=[{"pattern": "framework", "weight": 3.0}],
+        )
+        assert sc["hard"] == 0.0
+        assert "framework" in sc["violations"]
+
+    def test_one_bare_occurrence_among_negated_ones_vetoes(self) -> None:
+        sc = score_response(
+            "don't click it blindly. if it looks right, click it.",
+            check=[{"pattern": "broken", "weight": 1.0}],
+            must_not=[{"pattern": "click it", "weight": 2.0}],
+        )
+        assert "click it" in sc["violations"]
+
+    def test_negator_outside_window_still_vetoes(self) -> None:
+        # the negator must be NEAR the hit; a "not" forty-plus chars upstream
+        # is about something else entirely.
+        text = ("i have not finished reviewing the rest of the changes yet, "
+                "so click it whenever you are ready")
+        assert _forbidden_match("click it", text) is True
+
+    def test_negator_in_a_previous_sentence_still_vetoes(self) -> None:
+        # "not" here belongs to the previous clause, not to "create a skill".
+        # This is exactly the shape the discrimination-drift probe builds.
+        assert _forbidden_match("create a skill", "not worth. one-off. create a skill.") is True
+
+    def test_lemma_only_match_keeps_the_veto(self) -> None:
+        # no locatable offset => conservative fallback, the veto stands
+        assert _forbidden_match("framework", "we picked two frameworks") is True
 
 
 if __name__ == "__main__":

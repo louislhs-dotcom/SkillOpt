@@ -47,25 +47,23 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from skillopt.envs.scoring import (
-    _SYNONYMS,
+    NEGATION_WINDOW,
+    NEGATORS,
+    _forbidden_match,
+    _is_negated,
     _normalize,
-    _token_match,
+    _strict_variants,
+    _word_regex,
     score_response,
 )
 
 # ── Thresholds ──────────────────────────────────────────────────────────────
 EMPTY_RESPONSE_FRACTION = 0.20   # >20% empty/ERROR in one batch => harness fault
 OPTIMIZER_NOOP_STREAK = 5        # >=5 consecutive skip_no_patches steps
-NEGATION_WINDOW = 40             # chars before a veto hit scanned for a negator
 
-#: Cues that invert the meaning of a following phrase. Matched whole-token in
-#: the ``NEGATION_WINDOW`` characters preceding a ``must_not`` hit.
-NEGATORS = (
-    "don't", "dont", "do not", "does not", "doesn't", "did not", "didn't",
-    "never", "not", "no need to", "no need", "avoid", "avoids", "avoiding",
-    "won't", "will not", "shouldn't", "should not", "cannot", "can't",
-    "without", "instead of", "rather than", "refrain from", "stop",
-)
+# NEGATION_WINDOW / NEGATORS / _word_regex / _strict_variants / _is_negated are
+# imported from skillopt.envs.scoring so the gate and the scorer can never
+# disagree about what counts as a negated forbidden phrase.
 
 #: Severity per fault type. Informational — the CLI fails on any fault.
 SEVERITY = {
@@ -97,51 +95,21 @@ def _pattern_texts(specs: Any) -> list[str]:
     return [p for p in out if p]
 
 
-def _word_regex(phrase: str) -> str:
-    """Word-boundary-anchored regex source for a normalized phrase."""
-    prefix = r"\b" if phrase[:1].isalnum() else ""
-    suffix = r"\b" if phrase[-1:].isalnum() else ""
-    return prefix + re.escape(phrase) + suffix
-
-
-def _strict_variants(pattern: str) -> list[str]:
-    """Normalized phrasings that fire a STRICT (must_not) veto for ``pattern``.
-
-    Mirrors ``scoring._token_find(..., strict=True)``: the pattern itself plus
-    its MULTI-WORD synonyms. Bare single-word synonyms are excluded there
-    because they are too generic to justify a hard veto, so they are excluded
-    here too.
-    """
-    p = _normalize(pattern)
-    if not p:
-        return []
-    variants = [p]
-    for syn in _SYNONYMS.get(p, []):
-        syn_n = _normalize(syn)
-        if syn_n and " " in syn_n and syn_n not in variants:
-            variants.append(syn_n)
-    return variants
-
-
-def _is_negated(text_norm: str, start: int) -> str | None:
-    """Return the negation cue preceding offset ``start``, or None."""
-    window = text_norm[max(0, start - NEGATION_WINDOW):start]
-    for cue in NEGATORS:
-        if re.search(_word_regex(cue), window):
-            return cue
-    return None
-
-
 def find_false_veto(pattern: str, text: str) -> str | None:
     """Detect a must_not ``pattern`` that vetoes ``text`` only in negated form.
 
-    Returns a human-readable detail string when the veto fired AND every
-    locatable occurrence of the forbidden phrase is preceded by a negator
+    Returns a human-readable detail string when the scorer really vetoed AND
+    every locatable occurrence of the forbidden phrase is preceded by a negator
     ("don't click" vs must_not "click it"). Returns None when the veto did not
     fire, when any occurrence is un-negated (a legitimate veto), or when the
     veto came from a lemma match whose position cannot be recovered.
+
+    The gate is ``scoring._forbidden_match`` — the same predicate
+    ``score_response`` uses — so this reports only vetoes the scorer actually
+    applied. Since that predicate is itself negation-aware, this now acts as a
+    regression guard: it fires if the scorer's negation handling ever regresses.
     """
-    if not _token_match(pattern, text, strict=True):
+    if not _forbidden_match(pattern, text):
         return None
     norm = _normalize(text)
     hits: list[tuple[int, str]] = []

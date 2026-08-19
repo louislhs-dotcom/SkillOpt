@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from skillopt.envs.hermes_prompt import fault_gate
 from skillopt.envs.hermes_prompt.fault_gate import (
     EMPTY_RESPONSE_FRACTION,
     OPTIMIZER_NOOP_STREAK,
@@ -120,7 +121,16 @@ def test_empty_response_spike_is_per_batch(tmp_path):
 
 
 # ── 2. false_veto_pattern ───────────────────────────────────────────────────
-def test_find_false_veto_detects_negated_form():
+def test_find_false_veto_silent_once_the_scorer_suppresses_negation():
+    # The scorer itself is now negation-aware, so no veto fires at all and
+    # there is nothing to report.
+    assert find_false_veto("click it", "The link is dead, so don't click it — I'll fix it.") is None
+
+
+def test_find_false_veto_fires_if_the_scorer_regresses(monkeypatch):
+    # Regression guard: simulate a scorer that vetoes a wholly negated hit.
+    # The detector must still name the fault and the negation cue.
+    monkeypatch.setattr(fault_gate, "_forbidden_match", lambda pattern, text: True)
     detail = find_false_veto("click it", "The link is dead, so don't click it — I'll fix it.")
     assert detail is not None
     assert "don't" in detail
@@ -139,7 +149,15 @@ def test_find_false_veto_requires_every_occurrence_negated():
     assert find_false_veto("click it", text) is None
 
 
-def test_detect_false_veto_pattern_over_predictions():
+def test_detect_false_veto_pattern_clean_when_scorer_handles_negation():
+    items = [_item(id="i6", check=["broken"], must_not=["click it"])]
+    preds = [("selection_eval_baseline", "i6",
+              "The link is broken. Do not click it; I'll send the right link.")]
+    assert detect_false_veto_pattern(preds, items) == []
+
+
+def test_detect_false_veto_pattern_reports_a_regressed_scorer(monkeypatch):
+    monkeypatch.setattr(fault_gate, "_forbidden_match", lambda pattern, text: True)
     items = [_item(id="i6", check=["broken"], must_not=["click it"])]
     preds = [("selection_eval_baseline", "i6",
               "The link is broken. Do not click it; I'll send the right link.")]
@@ -156,11 +174,16 @@ def test_detect_false_veto_pattern_ignores_unknown_item_ids():
     assert detect_false_veto_pattern(preds, items) == []
 
 
-def test_false_veto_end_to_end(tmp_path):
+def test_false_veto_end_to_end(tmp_path, monkeypatch):
     run, data = tmp_path / "run", tmp_path / "data"
     _write_dataset(data, [_item(id="i6", check=["broken"], must_not=["click it"])])
     _write_prediction(run, "selection_eval_baseline", "i6",
                       "The link is broken, so don't click it.")
+    # Clean by default: the negation-aware scorer never vetoes this response.
+    assert [f for f in run_fault_gate(str(run), str(data))
+            if f["fault_type"] == "false_veto_pattern"] == []
+    # ...and reported end to end if the scorer's negation handling regresses.
+    monkeypatch.setattr(fault_gate, "_forbidden_match", lambda pattern, text: True)
     faults = [f for f in run_fault_gate(str(run), str(data))
               if f["fault_type"] == "false_veto_pattern"]
     assert len(faults) == 1

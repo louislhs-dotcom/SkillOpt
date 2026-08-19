@@ -361,6 +361,100 @@ def _token_match(pattern: str, text: str, strict: bool = False) -> bool:
     return _token_find(pattern, text, strict=strict) is not None
 
 
+# ── Negation-aware forbidden matching ───────────────────────────────────────
+# A must_not pattern that only ever appears NEGATED is not a violation: a
+# response that says "don't click it" is telling the user *not* to do the
+# forbidden thing, which is the correct answer, not a breach of it. Hard-vetoing
+# those responses punished correct answers (found by the harness fault gate:
+# must_not "click it" vs "don't click it", "database" vs "don't reach for a
+# database", "framework" vs "not a fancy framework").
+
+#: Chars before a forbidden hit that are scanned for a negation cue.
+NEGATION_WINDOW = 40
+
+#: Characters that end a clause. The negation scan never reads past one: a
+#: negator in a *previous* sentence says nothing about this occurrence
+#: ("not worth. one-off. create a skill." really does say "create a skill").
+_CLAUSE_BOUNDARY = re.compile(r"[.!?;\n]")
+
+#: Cues that invert the meaning of a following phrase. Matched whole-token in
+#: the ``NEGATION_WINDOW`` characters preceding a forbidden hit.
+NEGATORS = (
+    "don't", "dont", "do not", "does not", "doesn't", "did not", "didn't",
+    "never", "not", "no need to", "no need", "avoid", "avoids", "avoiding",
+    "won't", "will not", "shouldn't", "should not", "cannot", "can't",
+    "without", "instead of", "rather than", "refrain from", "stop",
+)
+
+
+def _word_regex(phrase: str) -> str:
+    """Word-boundary-anchored regex source for an already-normalized phrase."""
+    prefix = r"\b" if phrase[:1].isalnum() else ""
+    suffix = r"\b" if phrase[-1:].isalnum() else ""
+    return prefix + re.escape(phrase) + suffix
+
+
+def _strict_variants(pattern: str) -> list[str]:
+    """Normalized phrasings that can fire a STRICT (must_not) veto.
+
+    Mirrors ``_token_find(..., strict=True)``: the pattern itself plus its
+    MULTI-WORD synonyms. Bare single-word synonyms are excluded there because
+    they are too generic to justify a hard veto, so they are excluded here too.
+    """
+    p = _normalize(pattern)
+    if not p:
+        return []
+    variants = [p]
+    for syn in _SYNONYMS.get(p, []):
+        syn_n = _normalize(syn)
+        if syn_n and " " in syn_n and syn_n not in variants:
+            variants.append(syn_n)
+    return variants
+
+
+def _is_negated(text_norm: str, start: int) -> str | None:
+    """Return the negation cue preceding offset ``start`` in ``text_norm``, else None.
+
+    Scans at most ``NEGATION_WINDOW`` characters back, clipped at the nearest
+    clause boundary so a negator from an earlier sentence cannot suppress a
+    genuine violation.
+    """
+    window = text_norm[max(0, start - NEGATION_WINDOW):start]
+    boundaries = list(_CLAUSE_BOUNDARY.finditer(window))
+    if boundaries:
+        window = window[boundaries[-1].end():]
+    for cue in NEGATORS:
+        if re.search(_word_regex(cue), window):
+            return cue
+    return None
+
+
+def _forbidden_match(pattern: str, text: str) -> bool:
+    """True if ``pattern`` is genuinely violated by ``text`` (must_not path).
+
+    Strict matching (see ``_token_find``) decides *whether* the forbidden
+    phrase is present; this adds negation awareness on top. If every locatable
+    occurrence is preceded by a negator, the response is telling the user NOT
+    to do the forbidden thing and no violation is recorded. A single bare
+    (un-negated) occurrence is still a violation.
+
+    Conservative fallback: when the strict match came from a lemma form whose
+    offset cannot be recovered, the veto stands — silently dropping a veto is
+    worse than keeping one we cannot reason about.
+    """
+    if not _token_match(pattern, text, strict=True):
+        return False
+    norm = _normalize(text)
+    hits = [
+        m.start()
+        for variant in _strict_variants(pattern)
+        for m in re.finditer(_word_regex(variant), norm)
+    ]
+    if not hits:
+        return True  # lemma match, no offset to reason about => keep the veto
+    return any(_is_negated(norm, start) is None for start in hits)
+
+
 def _spec_matches(spec: dict, text_norm: str) -> bool:
     """True if ``text_norm`` matches the spec's pattern OR any accepted phrasing.
 
@@ -487,7 +581,9 @@ def score_response(
     # synonym only (never bare single-word synonyms), so a correct answer using
     # a word incidentally (e.g. "working alternative" vs must_not "it works")
     # is not falsely hard-vetoed.
-    violations = [s["pattern"] for s in forbidden if _token_match(s["pattern"], norm, strict=True)]
+    # ...and NEGATION-AWARE: "don't click it" does not violate must_not
+    # "click it" (see _forbidden_match).
+    violations = [s["pattern"] for s in forbidden if _forbidden_match(s["pattern"], norm)]
 
     total_weight = sum(s["weight"] for s in required)
     matched_weight = sum(
