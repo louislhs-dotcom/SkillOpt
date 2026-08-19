@@ -155,7 +155,13 @@ def preflight_config(items: dict[str, list], cfg: dict) -> dict:
 
     # Veto flag: the hard no-growth veto is a critical harness guard. If it's
     # off, flag it so the run doesn't silently regress into growth-acceptance.
-    if not cfg.get("optimizer", {}).get("veto_growing_candidates", False):
+    # Check BOTH nested (raw structured cfg) and flattened (scripts/train.py
+    # flattens a structured cfg before handing it to the trainer) forms.
+    veto = (
+        cfg.get("optimizer", {}).get("veto_growing_candidates")
+        or cfg.get("veto_growing_candidates")
+    )
+    if not veto:
         problems.append("veto_growing_candidates is OFF — growth candidates will not be auto-rejected")
 
     return {"ok": not problems, "problems": problems}

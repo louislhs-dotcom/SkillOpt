@@ -43,9 +43,11 @@ optimizer:
   lr_scheduler: constant
   use_meta_skill: false
   use_slow_update: false
+  # Hard no-growth veto (evidence: growing edits never improve the score).
+  veto_growing_candidates: true
 train:
   accumulation: 1
   batch_size: 5
   num_epochs: 1
   seed: 42
-  train_size: 41
+  train_size: 83
