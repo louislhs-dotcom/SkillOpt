@@ -1,0 +1,54 @@
+_base_: ../_base_/default.yaml
+env:
+  data_path: ''
+  limit: 0
+  max_completion_tokens: 1024
+  max_turns: 1
+  name: hermes-prompt
+  # PRIME ARCHITECTURE: editable skill is the addendum, core is immutable.
+  skill_init: skillopt/envs/hermes_prompt/skills/addendum_init.md
+  split_dir: data/hermes-prompt
+  split_mode: split_dir
+  split_ratio: "6:2:2"
+  split_output_dir: ''
+  workers: 3
+  switchyard_config: configs/switchyard_skillopt.toml
+  switchyard_optimizer_route: glm52
+  switchyard_target_route: deepseek_flash
+  switchyard_timeouts:
+    glm52: 300
+    deepseek_flash: 240
+  switchyard_max_retries: 3
+  switchyard_request_delay: 1.5
+evaluation:
+  eval_test: false
+  gate_metric: soft
+  sel_env_num: 21
+  test_env_num: 21
+  use_gate: true
+gradient:
+  analyst_workers: 4
+  failure_only: false
+  merge_batch_size: 4
+  minibatch_size: 4
+model:
+  backend: switchyard
+  optimizer: glm-5.2:cloud
+  optimizer_backend: switchyard
+  target: deepseek-v4-flash:cloud
+  target_backend: switchyard
+  reasoning_effort: low
+  extra_body:
+    chat_template_kwargs:
+      thinking: true
+optimizer:
+  learning_rate: 3
+  lr_scheduler: constant
+  use_meta_skill: false
+  use_slow_update: false
+train:
+  accumulation: 1
+  batch_size: 4
+  num_epochs: 2
+  seed: 42
+  train_size: 63

@@ -17,7 +17,7 @@ env:
 evaluation:
   eval_test: false
   gate_metric: soft
-  sel_env_num: 20
+  sel_env_num: 21
   test_env_num: 21
   use_gate: true
 gradient:
@@ -62,4 +62,4 @@ train:
   batch_size: 4
   num_epochs: 2
   seed: 42
-  train_size: 61
+  train_size: 63
