@@ -194,8 +194,10 @@ class WebIntelAdapter(EnvAdapter):
                     stage="rollout",
                 )
                 text = response_text if isinstance(response_text, str) else str(response_text)
+                fail_reason = ""
             except Exception as e:
                 text = f"ERROR: {e}"
+                fail_reason = f"harness_error: {type(e).__name__}: {e}"
 
             # Granular rubric scoring (task-type aware + site-specific)
             task_type = item.get("task_type", "routing")
@@ -307,11 +309,20 @@ class WebIntelAdapter(EnvAdapter):
                           {"role": "user", "content": user_msg},
                           {"role": "assistant", "content": text}], f, indent=2)
 
+            # Empty-response telemetry: a blank/whitespace-only model output is a
+            # harness/infra fault (rate-limit, context overflow, model hiccup),
+            # not a wrong answer. Tag it so the postflight empty-response spike
+            # gate (harness_fault_gate.py) can see it. Prefer the explicit
+            # harness_error from the chat call; otherwise flag empty text.
+            if not fail_reason and not text.strip():
+                fail_reason = "empty_response: model returned blank output"
+
             return {
                 "id": iid, "score": score, "response": text[:500],
                 "ground_truth": item.get("ground_truth", "")[:200],
                 "hard": hard,
                 "soft": score,
+                "fail_reason": fail_reason,
                 "rubric_score": sc["rubric_score"],
                 "penalty": sc["penalty"],
                 "criteria_met": sc["criteria_met"],

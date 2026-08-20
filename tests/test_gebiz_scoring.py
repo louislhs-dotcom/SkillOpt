@@ -3,7 +3,7 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from skillopt.envs.gebiz.scoring import score_response, score_item, _token_match
+from skillopt.envs.scoring import score_response, score_item, _token_match
 
 
 def check(name, cond):

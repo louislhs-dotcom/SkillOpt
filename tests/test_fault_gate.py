@@ -1,4 +1,9 @@
-"""Regression tests for the hermes-prompt harness-fault gate.
+"""Regression tests for the consolidated harness-fault gate detectors.
+
+These used to live against skillopt/envs/hermes_prompt/fault_gate.py, a
+per-env second gate that was never wired into the trainer. That module is
+gone; every detector now lives in the one env-agnostic gate
+(skillopt/envs/harness_fault_gate.py) and these tests follow it there.
 
 One synthetic fixture per detector: each test builds a minimal run dir /
 dataset dir on tmp_path, asserts the fault fires, and asserts a healthy
@@ -11,16 +16,16 @@ from pathlib import Path
 
 import pytest
 
-from skillopt.envs.hermes_prompt import fault_gate
-from skillopt.envs.hermes_prompt.fault_gate import (
+from skillopt.envs import harness_fault_gate as fault_gate
+from skillopt.envs.harness_fault_gate import (
     EMPTY_RESPONSE_FRACTION,
-    OPTIMIZER_NOOP_STREAK,
+    OPTIMIZER_NO_CANDIDATE_STREAK,
+    detect_config_mismatch,
     detect_discrimination_drift,
     detect_empty_response_spike,
     detect_false_veto_pattern,
     detect_optimizer_did_nothing,
     find_false_veto,
-    main,
     run_fault_gate,
 )
 
@@ -222,7 +227,7 @@ def test_optimizer_did_nothing_reports_each_streak():
 
 def test_optimizer_did_nothing_end_to_end(tmp_path):
     run, data = tmp_path / "run", tmp_path / "data"
-    _write_history(run, ["skip_no_patches"] * OPTIMIZER_NOOP_STREAK)
+    _write_history(run, ["skip_no_patches"] * OPTIMIZER_NO_CANDIDATE_STREAK)
     _write_dataset(data, [_item()])
     faults = [f for f in run_fault_gate(str(run), str(data))
               if f["fault_type"] == "optimizer_did_nothing"]
@@ -283,6 +288,94 @@ def test_discrimination_drift_end_to_end(tmp_path):
     assert faults
 
 
+# ── 5. config_mismatch ─────────────────────────────────────────────────────
+def test_config_mismatch_silent_when_identity_matches():
+    run = {"env": "hermes-prompt", "skill_init": "s.md", "split_dir": "data/lean",
+           "target_model": "deepseek-v4-flash:cloud", "optimizer_model": "glm-5.2:cloud",
+           "gate_metric": "soft", "data_path": ""}
+    expected = dict(run)
+    assert detect_config_mismatch(run, expected) == []
+
+
+def test_config_mismatch_flags_wrong_env():
+    run = {"env": "webintel", "skill_init": "s.md", "split_dir": "data/lean",
+           "target_model": "deepseek-v4-flash:cloud", "optimizer_model": "glm-5.2:cloud",
+           "gate_metric": "soft", "data_path": ""}
+    expected = {"env": "hermes-prompt", "skill_init": "s.md", "split_dir": "data/lean",
+                "target_model": "deepseek-v4-flash:cloud", "optimizer_model": "glm-5.2:cloud",
+                "gate_metric": "soft", "data_path": ""}
+    faults = detect_config_mismatch(run, expected)
+    assert len(faults) == 1
+    assert faults[0]["fault_type"] == "config_mismatch"
+    assert faults[0]["severity"] == "high"
+    assert "env" in faults[0]["detail"]
+    assert "webintel" in faults[0]["detail"] and "hermes-prompt" in faults[0]["detail"]
+
+
+def test_config_mismatch_flags_wrong_skill_and_dataset():
+    run = {"env": "hermes-prompt", "skill_init": "webintel/skills/initial.md",
+           "split_dir": "data/webintel_split", "target_model": "deepseek-v4-flash:cloud",
+           "optimizer_model": "glm-5.2:cloud", "gate_metric": "soft", "data_path": ""}
+    expected = {"env": "hermes-prompt", "skill_init": "hermes_prompt/skills/addendum_init.md",
+                "split_dir": "data/hermes-prompt-lean", "target_model": "deepseek-v4-flash:cloud",
+                "optimizer_model": "glm-5.2:cloud", "gate_metric": "soft", "data_path": ""}
+    faults = detect_config_mismatch(run, expected)
+    types = {f["fault_type"] for f in faults}
+    assert types == {"config_mismatch"}
+    assert len(faults) == 2  # skill_init + split_dir
+    assert any("skill_init" in f["detail"] for f in faults)
+    assert any("split_dir" in f["detail"] for f in faults)
+
+
+def test_config_mismatch_silent_when_expected_missing():
+    assert detect_config_mismatch({"env": "webintel"}, {}) == []
+
+
+def test_config_mismatch_ignores_non_identity_fields():
+    run = {"env": "hermes-prompt", "skill_init": "s.md", "split_dir": "data/lean",
+           "target_model": "deepseek-v4-flash:cloud", "optimizer_model": "glm-5.2:cloud",
+           "gate_metric": "soft", "data_path": "", "workers": 3, "batch_size": 4}
+    expected = {"env": "hermes-prompt", "skill_init": "s.md", "split_dir": "data/lean",
+                "target_model": "deepseek-v4-flash:cloud", "optimizer_model": "glm-5.2:cloud",
+                "gate_metric": "soft", "data_path": "", "workers": 8, "batch_size": 16}
+    assert detect_config_mismatch(run, expected) == []
+
+
+def test_config_mismatch_end_to_end(tmp_path):
+    """A run whose config.json says webintel but the intended config is
+    hermes-prompt must be flagged by run_fault_gate."""
+    run, data = tmp_path / "run", tmp_path / "data"
+    _write_dataset(data, [_item()])
+    _write_telemetry(run, "selection_eval_baseline", [_telemetry_row("t1")])
+    _write_prediction(run, "selection_eval_baseline", "t1", "Report: done, here is the result.")
+    _write_history(run, ["accept", "reject", "accept"])
+    (run / "config.json").write_text(json.dumps({
+        "env": "webintel", "skill_init": "webintel/skills/initial.md",
+        "split_dir": "data/webintel_split", "target_model": "deepseek-v4-flash:cloud",
+        "optimizer_model": "glm-5.2:cloud", "gate_metric": "soft", "data_path": "",
+    }), encoding="utf-8")
+    expected = {"env": "hermes-prompt", "skill_init": "hermes_prompt/skills/addendum_init.md",
+                "split_dir": "data/hermes-prompt-lean", "target_model": "deepseek-v4-flash:cloud",
+                "optimizer_model": "glm-5.2:cloud", "gate_metric": "soft", "data_path": ""}
+    faults = [f for f in run_fault_gate(str(run), str(data), expected)
+              if f["fault_type"] == "config_mismatch"]
+    assert len(faults) == 3  # env + skill_init + split_dir
+
+
+def test_config_mismatch_clean_end_to_end(tmp_path):
+    """A run whose config.json matches the intended config stays clean."""
+    run, data = tmp_path / "run", tmp_path / "data"
+    _write_dataset(data, [_item()])
+    _write_telemetry(run, "selection_eval_baseline", [_telemetry_row("t1")])
+    _write_prediction(run, "selection_eval_baseline", "t1", "Report: done, here is the result.")
+    _write_history(run, ["accept", "reject", "accept"])
+    cfg = {"env": "hermes-prompt", "skill_init": "hermes_prompt/skills/addendum_init.md",
+           "split_dir": "data/hermes-prompt-lean", "target_model": "deepseek-v4-flash:cloud",
+           "optimizer_model": "glm-5.2:cloud", "gate_metric": "soft", "data_path": ""}
+    (run / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    assert run_fault_gate(str(run), str(data), cfg) == []
+
+
 # ── Gate contract + CLI ─────────────────────────────────────────────────────
 def test_run_fault_gate_clean_run_returns_empty(tmp_path):
     run, data = tmp_path / "run", tmp_path / "data"
@@ -311,26 +404,27 @@ def test_every_fault_has_the_three_required_keys(tmp_path):
         assert isinstance(f["detail"], str) and f["detail"]
 
 
-def test_cli_exits_zero_when_clean(tmp_path, capsys):
+def test_cli_audit_exits_zero_when_clean(tmp_path, capsys):
     run, data = tmp_path / "run", tmp_path / "data"
     _write_dataset(data, [_item()])
     run.mkdir()
-    assert main([str(run), str(data)]) == 0
+    assert fault_gate.main(["audit", "--run", str(run), "--data", str(data)]) == 0
     assert "PASS" in capsys.readouterr().out
 
 
-def test_cli_exits_one_when_faults_found(tmp_path, capsys):
+def test_cli_audit_exits_one_when_faults_found(tmp_path, capsys):
     run, data = tmp_path / "run", tmp_path / "data"
     _write_dataset(data, [_item(id="bad", check=["report"], must_not=["report"])])
     run.mkdir()
-    assert main([str(run), str(data)]) == 1
+    assert fault_gate.main(["audit", "--run", str(run), "--data", str(data)]) == 1
     out = capsys.readouterr().out
     assert "discrimination_drift" in out and "FAIL" in out
 
 
-def test_cli_usage_error_on_wrong_arity(capsys):
-    assert main([]) == 2
-    assert "usage:" in capsys.readouterr().err
+def test_cli_usage_error_without_subcommand(capsys):
+    with pytest.raises(SystemExit) as exc:
+        fault_gate.main([])
+    assert exc.value.code == 2
 
 
 @pytest.mark.parametrize("threshold", [EMPTY_RESPONSE_FRACTION])

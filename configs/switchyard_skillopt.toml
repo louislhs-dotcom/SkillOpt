@@ -55,3 +55,27 @@ target = "fast"
 id = "lightning"
 type = "passthrough"
 target = "lightning"
+
+# --- Ollama Cloud client, for hermes-prompt routes ---
+[llm_clients.ollama]
+format = "openai_chat"
+base_url = "https://ollama.com/v1"
+api_key_env = "OLLAMA_API_KEY"
+
+[targets.glm52]
+id = "glm-5.2:cloud"
+llm_client = "ollama"
+
+[targets.deepseek_v4_flash]
+id = "deepseek-v4-flash:cloud"
+llm_client = "ollama"
+
+[routes.glm52]
+id = "glm52"
+type = "passthrough"
+target = "glm52"
+
+[routes.deepseek_flash]
+id = "deepseek_flash"
+type = "passthrough"
+target = "deepseek_v4_flash"

@@ -26,7 +26,10 @@ from skillopt.datasets.base import BatchSpec
 from skillopt.envs.base import EnvAdapter
 from skillopt.envs.harness_fault_gate import (
     OPTIMIZER_NOOP_ABORT,
+    load_config as _load_run_config,
+    optimizer_no_candidate_streak,
     optimizer_noop_streak,
+    preflight_config_identity,
     preflight_discrimination,
     preflight_config,
     postflight,
@@ -997,6 +1000,44 @@ class ReflACTTrainer:
         cfg["skill_update_mode"] = update_mode
         cfg["lr_control_mode"] = lr_control_mode
 
+        # ── Harness-fault CONFIG IDENTITY guard ──────────────────────────
+        # The earliest possible check: it runs before the baseline eval and
+        # before the first training step, so a wrong-env run costs zero tokens.
+        # Two independent signals, neither of which can be satisfied by simply
+        # believing the config:
+        #   1. env coherence — the declared env vs the paths the run uses
+        #      (skill_init / split_dir / data_path / out_root). Catches the
+        #      webintel-vs-hermes-prompt conflation.
+        #   2. run-dir identity — out_root's PRE-EXISTING config.json (read
+        #      before we overwrite it) vs this config. Catches pointing a new
+        #      config at a previous run's directory.
+        # NOTE: postflight cannot do (1)/(2) for us — config.json is written
+        # from this same cfg object, so comparing them after the fact is
+        # tautological and detects nothing.
+        prior_run_config = _load_run_config(out_root)
+        _hg_id = cfg.get("harness_gate", {})
+        if _hg_id.get("enabled", True):
+            try:
+                ident = preflight_config_identity(cfg, prior_run_config)
+                if not ident["ok"]:
+                    print(f"\n{'='*60}")
+                    print("  HARNESS-FAULT CONFIG IDENTITY")
+                    print(f"{'='*60}")
+                    for name, chk in ident["checks"].items():
+                        for prob in chk["problems"]:
+                            print(f"    [FAIL] {name}: {prob}")
+                    if _hg_id.get("preflight_abort_on_fail", True):
+                        raise SystemExit(
+                            "CONFIG IDENTITY FAILED — this run would optimize the "
+                            "wrong env, or reuse another run's directory. Fix the "
+                            "config or out_root. (set "
+                            "harness_gate.preflight_abort_on_fail=false to override)"
+                        )
+            except SystemExit:
+                raise
+            except Exception as e:
+                print(f"  [WARN] config identity check errored (continuing): {e}")
+
         # Save config after deriving runtime values.
         with open(os.path.join(out_root, "config.json"), "w") as f:
             json.dump(_redact_cfg(cfg), f, indent=2, ensure_ascii=False)
@@ -1317,7 +1358,7 @@ class ReflACTTrainer:
                 # (postflight only flags the same streak after the run ends).
                 # `history` is the in-memory list — history.json is not re-read.
                 if noop_abort_threshold > 0:
-                    noop_streak = optimizer_noop_streak(
+                    noop_streak = optimizer_no_candidate_streak(
                         h.get("action") for h in history
                     )
                     if noop_streak >= noop_abort_threshold:
@@ -2675,9 +2716,14 @@ class ReflACTTrainer:
             json.dump(summary, f, indent=2, ensure_ascii=False)
 
         # ── Harness-fault POSTFLIGHT ─────────────────────────────────────
-        # Run after the loop: flag empty-response spikes and optimizer-noop
-        # streaks. Report-only (the run already finished) unless configured
-        # otherwise.
+        # Run after the loop: flag empty-response spikes, optimizer-noop
+        # streaks, and a persisted config whose paths disagree with its env.
+        # Report-only (the run already finished) unless configured otherwise.
+        # `expected_config` is deliberately NOT passed: config.json is written
+        # from this same cfg object, so comparing them would be tautological.
+        # The real identity guard runs at CONFIG IDENTITY, before any tokens
+        # are spent. Pass an expected config only from the CLI, where it comes
+        # from an independent source.
         hg = cfg.get("harness_gate", {})
         if hg.get("enabled", True):
             print(f"\n{'='*60}")

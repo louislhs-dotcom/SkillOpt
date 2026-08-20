@@ -195,7 +195,14 @@ def get_rubric_for_task(task_type: str) -> List[str]:
 
 
 def _token_match(pattern: str, text: str) -> bool:
-    """Word-boundary token match."""
+    """Word-boundary token match.
+
+    An empty pattern never matches: ``re.escape("")`` compiles to a regex that
+    matches at every offset, so an empty criterion keyword would silently mark
+    every response as satisfying it.
+    """
+    if not pattern:
+        return False
     p = re.escape(pattern.lower())
     t = text.lower()
     prefix = r"\b" if pattern[:1].isalnum() else ""
@@ -353,6 +360,13 @@ def score_with_rubric(text: str, rubric: List[str] | None = None, task_type: str
             "rubric_score": 0.0,
             "penalty": 0.0,
             "final_score": 0.0,
+            # HARDENED: the non-empty path below and both LLM judges
+            # (dsh_judge / nvidia_judge) always return `hard` and `soft`.
+            # Omitting them here made the empty/None response the one code path
+            # with a different return shape, so any caller doing sc["hard"]
+            # crashed only on the model-failure case.
+            "hard": 0.0,
+            "soft": 0.0,
         }
     
     if task_type and not rubric:

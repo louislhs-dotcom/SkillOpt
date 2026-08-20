@@ -96,3 +96,60 @@ def test_rollout_prompt_changes_when_skill_changes(tmp_path, monkeypatch):
     assert seen[0] != seen[1]
     assert "alpha marker" in seen[0] and "alpha marker" not in seen[1]
     assert "bravo marker" in seen[1]
+
+
+def test_rollout_records_harness_error_fail_reason(tmp_path, monkeypatch):
+    """A chat_target exception must surface as harness_error fail_reason so the
+    postflight empty-response/harness-fault gate can see it (was: swallowed into
+    the response text, grouped as 'unknown' in the failure digest)."""
+    import skillopt.model as model
+
+    def boom(system, user, **kwargs):
+        raise RuntimeError("rate limited")
+
+    monkeypatch.setattr(model, "chat_target", boom)
+
+    items = [{"id": "t1", "question": "q", "task_type": "webintel",
+              "site": "", "check": ["ok"], "must_not": [], "optional": []}]
+    results = _adapter().rollout(items, SKILL, str(tmp_path))
+
+    assert len(results) == 1
+    r = results[0]
+    assert r["fail_reason"].startswith("harness_error:")
+    assert "RuntimeError" in r["fail_reason"]
+    assert "rate limited" in r["fail_reason"]
+
+
+def test_rollout_records_empty_response_fail_reason(tmp_path, monkeypatch):
+    """A blank model output must be tagged empty_response (harness fault), not
+    silently scored as a wrong answer."""
+    import skillopt.model as model
+
+    monkeypatch.setattr(
+        model, "chat_target",
+        lambda system, user, **kw: ("   \n  ", {}),
+    )
+
+    items = [{"id": "t1", "question": "q", "task_type": "webintel",
+              "site": "", "check": ["ok"], "must_not": [], "optional": []}]
+    results = _adapter().rollout(items, SKILL, str(tmp_path))
+
+    assert len(results) == 1
+    assert results[0]["fail_reason"].startswith("empty_response:")
+
+
+def test_rollout_success_has_empty_fail_reason(tmp_path, monkeypatch):
+    """A normal response must carry an empty fail_reason (not 'unknown')."""
+    import skillopt.model as model
+
+    monkeypatch.setattr(
+        model, "chat_target",
+        lambda system, user, **kw: ("Use defuddle parse --markdown.", {}),
+    )
+
+    items = [{"id": "t1", "question": "q", "task_type": "webintel",
+              "site": "", "check": ["defuddle"], "must_not": [], "optional": []}]
+    results = _adapter().rollout(items, SKILL, str(tmp_path))
+
+    assert len(results) == 1
+    assert results[0]["fail_reason"] == ""

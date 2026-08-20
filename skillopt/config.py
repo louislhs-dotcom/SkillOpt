@@ -211,6 +211,11 @@ def flatten_config(cfg: dict) -> dict:
         if isinstance(section_dict, dict) and key in section_dict:
             flat[flat_key] = section_dict[key]
 
+    # Pass through the harness_gate section verbatim: the trainer reads it as a
+    # nested dict (cfg["harness_gate"]["..."]), so flattening must not drop it.
+    if isinstance(cfg.get("harness_gate"), dict):
+        flat["harness_gate"] = cfg["harness_gate"]
+
     # Pass through env-specific keys not in the explicit mapping
     env_section = cfg.get("env", {})
     if isinstance(env_section, dict):
